@@ -317,8 +317,8 @@ mod spawner_tests {
             Ok(Some(AsyncResult::PathSearchResult(results))) => {
                 assert!(results.is_empty(), "Expected no results for non-existent path, got {:?}", results);
             }
-            Ok(Some(AsyncResult::Error(e))) => {
-                println!("[Test OK with Error] Received error for non-existent path (possibly zoxide not installed/configured, which is fine for this specific test focusing on not finding the direct path): {}", e);
+            Ok(Some(AsyncResult::Error(_e))) => {
+                // println!("[Test OK with Error] Received error for non-existent path (possibly zoxide not installed/configured, which is fine for this specific test focusing on not finding the direct path): {}", e);
                 // This is an acceptable outcome if zoxide errors but the non-existent path isn't found.
             }
             Ok(Some(other)) => panic!("Expected empty PathSearchResult or specific Error, got {:?}", other),

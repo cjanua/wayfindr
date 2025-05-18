@@ -16,7 +16,7 @@ use ratatui::{
 };
 
 mod types;
-use types::{AsyncResult, AppError};
+use types::{ActionResult, AppError, AsyncResult};
 
 mod spawners;
 use spawners::path_search::spawn_path_search;
@@ -26,13 +26,12 @@ mod tests;
 
 struct App {
     input: String,
-    output: Vec<String>,
+    output: Vec<ActionResult>,
     history: Vec<String>,
     exit_flag: bool,
     err_msg: String,
     is_loading: bool,
-
-    spawner_results: Vec<String>,
+    selected_output_index: usize,
 }
 impl App {
     fn new() -> Self {
@@ -45,15 +44,47 @@ impl App {
             err_msg: String::new(),
             is_loading: false,
 
-            spawner_results: vec!(),
+            selected_output_index: 0,
         }
     }
 
     fn clear_prev(&mut self) {
         self.output.clear();
         self.err_msg.clear();
-        self.spawner_results.clear();
     }
+
+    async fn execute_action(&self, action_result: &ActionResult) -> Result<(), AppError> {
+        match action_result.spawner.as_str() {
+            "z" | "fs" => {
+                if action_result.action == "cd" {
+                    // For now, we'll just print the command.
+                    // In a real application, you'd likely want to:
+                    // 1. Spawn a new terminal window.
+                    // 2. Send the 'cd' command to that terminal.
+                    // This is more involved and depends on the terminal emulator.
+                    // For this example, let's just print what would happen.
+                    println!("Executing: cd \"{}\"", action_result.data);
+                    // Example of actually spawning a process (not ideal for 'cd' in the current terminal)
+                    // AsyncCommand::new("sh")
+                    //     .arg("-c")
+                    //     .arg(format!("cd \"{}\"", action_result.data))
+                    //     .spawn()
+                    //     .map_err(|e| AppError::ActionError(format!("Failed to spawn process: {}", e)))?;
+                    Ok(())
+                } else {
+                    Err(AppError::ActionError(format!(
+                        "Unknown action '{}' for spawner '{}'",
+                        action_result.action, action_result.spawner
+                    )))
+                }
+            }
+            _ => Err(AppError::ActionError(format!(
+                "Unknown spawner '{}'",
+                action_result.spawner
+            ))),
+        }
+    }
+
 }
 
 fn setup_terminal() -> AnyhowResult<()> {
@@ -104,7 +135,7 @@ async fn main() -> AnyhowResult<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     let mut app = App::new();
 
-    let app_result = run_app(&mut terminal, &mut app);
+    let app_result = run_app(&mut terminal, &mut app).await;
     if let Err(e) = restore_terminal() {
         eprintln!("[main] FATAL: Failed to restore terminal: {:?}", e);
     }
@@ -116,7 +147,7 @@ async fn main() -> AnyhowResult<()> {
     Ok(())
 }
 
-fn run_app(
+async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     app: &mut App,
 ) -> Result<(), AppError> {
@@ -155,6 +186,19 @@ fn run_app(
                             if !query.is_empty() {
                                 spawn_path_search(query, sender.clone());
                                 app.is_loading = true;
+                            } else if let Some(first_result) = app.output.first() {
+                                // Execute action on the first result if input is empty on Enter
+                                app.execute_action(first_result).await?;
+                            }
+                        }
+                        KeyCode::Up => {
+                            if app.selected_output_index > 0 {
+                                app.selected_output_index -= 1;
+                            }
+                        }
+                        KeyCode::Down => {
+                            if app.selected_output_index < app.output.len() - 1 {
+                                app.selected_output_index += 1;
                             }
                         }
                         _ => {
@@ -170,14 +214,9 @@ fn run_app(
             Ok(async_result) => {
                 app.is_loading = false;
                 match async_result {
-                    AsyncResult::ZoxideResult(results) => {
-                        app.spawner_results = results;
+                    AsyncResult::PathSearchResult(results) => {
+                        app.output = results;
                         app.err_msg.clear();
-                        if !app.spawner_results.is_empty() {
-                            app.output = app.spawner_results.clone();
-                        } else {
-                            app.output = vec!["No results found".to_string()];
-                        }
                     }
                     AsyncResult::Error(err_text) => {
                         app.clear_prev();
@@ -213,7 +252,8 @@ fn ui(
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Input area
-            Constraint::Length(3), // Empty output box
+            // Consider changing this to allow more lines, e.g., Constraint::Length(4) or more
+            Constraint::Length(4), // Output area (e.g., 4 for 2 lines of content)
             Constraint::Min(0),    // History area
         ])
         .split(frame.area());
@@ -227,26 +267,24 @@ fn ui(
     let output_text = if app.is_loading {
         "Loading...".to_string()
     } else if !app.err_msg.is_empty() {
-        format!("Error: {}", app.err_msg) // Display error message
+        format!("Error: {}", app.err_msg)
     } else if !app.output.is_empty() {
-        // app.output is now expected to hold the primary result string(s)
-        app.output.join("\n") // If app.output can have multiple lines
+        app.output
+            .iter()
+            .map(|res| format!("[{}] {} {}", res.spawner, res.action, res.description))
+            .collect::<Vec<String>>()
+            .join("\n")
     } else {
-        // No results, no error, not loading
         "No results".to_string()
     };
-    let output_block = Paragraph::new(output_text.to_string())
+    let output_block = Paragraph::new(output_text)
         .block(Block::default().borders(Borders::ALL).title("Output"))
         .style(Style::default().fg(Color::Cyan));
     frame.render_widget(output_block, main_layout[1]);
 
-    let mut history_text = app.history[0..std::cmp::min(app.history.len(), 10)].join("\n");
-    if app.history.len() > 11 {
-        history_text.push_str("\n...\n");
-    }
-    let history_block = Paragraph::new(history_text.to_string())
+    let history_text = app.history[0..std::cmp::min(app.history.len(), 10)].join("\n");
+    let history_block = Paragraph::new(history_text)
         .block(Block::default().borders(Borders::ALL).title("History"))
         .style(Style::default().fg(Color::White));
-
     frame.render_widget(history_block, main_layout[2]);
 }

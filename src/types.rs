@@ -3,8 +3,16 @@
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
+pub struct ActionResult {
+    pub spawner: String,
+    pub action: String,
+    pub description: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone)]
 pub enum AsyncResult {
-    ZoxideResult(Vec<String>),
+    PathSearchResult(Vec<ActionResult>),
     AnotherProcessResult(String),
     YetAnotherResult(i32),
     Error(String),
@@ -16,4 +24,6 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("Terminal error")]
     TerminalError,
+    #[error("Action execution error: {0}")]
+    ActionError(String),
 }

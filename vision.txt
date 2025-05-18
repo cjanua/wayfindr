@@ -1,0 +1,661 @@
+Okay, this is an exciting project\! Building a Rofi/Alfred-inspired launcher on Wayland/Hyprland with Gemini integration in Rust is ambitious but definitely achievable, especially with your programming experience. Let's break down how you can approach this.
+
+Given the current date of Friday, May 16, 2025, the landscape for Rust GUI and Wayland development is quite mature.
+
+**Project Title Idea:** *Wayfinder* (or something similar that evokes navigation and intelligence)
+
+Here’s a breakdown of the architecture, features, and considerations:
+
+**I. Core Architecture & UI (Rust for Wayland/Hyprland)**
+
+You want an application that's highly responsive and integrates well with Wayland. You're considering Rust and potentially a TUI, but for a Rofi/Alfred-like experience, a lightweight graphical overlay is more common.
+
+  * **Windowing and Rendering on Wayland:**
+
+      * **Wayland-Native Libraries:**
+          * **`winit` + a rendering engine:** `winit` is a popular window creation library in Rust that supports Wayland. You'd pair it with a rendering library like:
+              * **`iced`**: A data-centric GUI library that's gaining traction. It has improving Wayland support. It's declarative and might fit your desire for easy iteration.
+              * **`slint`**: A declarative GUI toolkit with first-class Rust support and its own design language. It's known for being lightweight and embeddable, with good Wayland support.
+              * **`smithay` (Client Toolkit):** While `smithay` is renowned for building Wayland compositors, its client toolkit can be used to create Wayland applications. This gives you very low-level control.
+          * **`gtk-rs`**: GTK is a mature toolkit with excellent Wayland support. `gtk-rs` provides Rust bindings. This is a robust choice if you need many standard widgets.
+          * **`qt-rust`**: Qt also has strong Wayland support. Similar to GTK, it's a comprehensive framework.
+      * **Layer Shell Protocol:** To behave like Rofi (appearing as an overlay panel), your application will need to use the Wayland `layer-shell` protocol. This allows windows to be positioned relative to the screen edges, above other windows, and to reserve space. Both `winit` (often with manual setup or via a higher-level toolkit) and toolkits like `gtk-rs` and `slint` can support this.
+      * **TUI (Terminal User Interface) Approach:**
+          * Libraries: `ratatui` (a community-maintained fork of `tui-rs`) or `cursive`.
+          * How it would work: You'd launch a terminal emulator window configured to be borderless, transparent (if your terminal supports it and you're using a compositor like Hyprland that handles transparency well), and positioned as an overlay. This approach might be simpler for rapid prototyping of the logic but can be trickier to make feel as slick as a native GUI overlay. It might not integrate as seamlessly with Wayland layer-shell for things like keyboard exclusivity without extra work.
+
+  * **Recommendation for UI:**
+
+      * For a polished, Rofi-like graphical overlay: **`slint`** or **`iced`** are strong contenders due to their modern Rust-centric approach and declarative style, which can aid rapid iteration. `slint` is particularly interesting for its dedicated UI markup language.
+      * If you lean towards a TUI, **`ratatui`** is excellent, but be prepared for the different aesthetic and integration challenges.
+
+**II. Feature Implementation Details**
+
+1.  **Rofi/Alfred Inspired Search Bar:**
+
+      * **Input Field:** A central text input widget.
+      * **Results List:** A scrollable list area below the input to display results.
+      * **Event Handling:** Capture key presses for navigation (up/down arrows, Enter for selection, Esc to close).
+      * **Asynchronous Operations:** Crucial for web searches, AI interactions, and even intensive local searches so the UI doesn't freeze. Rust's `async/await` with runtimes like `tokio` or `async-std` is perfect for this.
+
+2.  **Zoxide Integration (Fuzzy Directory Finding):**
+
+      * **Mechanism:** `zoxide query <search-terms>` will output the best matching directory.
+      * **Rust Implementation:**
+          * Use `std::process::Command` to execute the `zoxide` command.
+          * Capture its standard output.
+          * Parse the output to get the directory path.
+          * You'll want to make these calls asynchronous.
+        <!-- end list -->
+        ```rust
+        // Example (simplified)
+        use std::process::Command;
+
+        async fn query_zoxide(terms: &str) -> Option<String> {
+            let output = Command::new("zoxide")
+                .arg("query")
+                .arg(terms)
+                .output()
+                .ok()?;
+
+            if output.status.success() {
+                String::from_utf8(output.stdout).ok().map(|s| s.trim().to_string())
+            } else {
+                None
+            }
+        }
+        ```
+      * **Display:** Show directory results, perhaps with an icon. Selecting one could open it in a file manager or terminal.
+
+3.  **Web Search & Quick Answers:**
+
+      * **Backend:**
+          * You can directly query search engines. DuckDuckGo has a fairly accessible Instant Answer API.
+          * For more complex queries or if you want to scrape results (be mindful of ToS), libraries like `reqwest` (HTTP client) and `scraper` (HTML parsing) would be used.
+      * **Quick Answers (Sports, Weather, Translations):**
+          * **APIs:** The most reliable way.
+              * Weather: OpenWeatherMap API, WeatherAPI.com
+              * Translations: Use your Gemini API for this, or other translation APIs.
+              * Sports: Various sports APIs exist (e.g., TheSportsDB). Many have free tiers.
+          * **Gemini for Quick Answers:** You can format a prompt to Gemini to ask for specific information like "What's the weather in [city]?" or "Translate '[text]' to [language]". Parse the structured output if possible, or the plain text.
+      * **Display:** Show quick answers directly in the results list, clearly delineated.
+
+4.  **AI Mode (Gemini Integration):**
+
+      * **API Interaction:**
+          * Use the `reqwest` library in Rust to make HTTPS POST requests to the Gemini API endpoint.
+          * You'll need to handle your API key securely (e.g., environment variable, config file with appropriate permissions).
+          * Refer to the official Google Gemini API documentation for request/response formats.
+      * **User Experience:**
+          * A specific prefix or mode (e.g., `ai: your prompt`) to trigger Gemini.
+          * Stream responses if the API supports it for a more interactive feel.
+          * Display the AI's response in the results area, perhaps formatted nicely (e.g., handling markdown).
+      * **Error Handling:** Implement robust error handling for API timeouts, rate limits, invalid key, etc.
+
+5.  **Execute Bash Commands:**
+
+      * **Safety First:** This is a powerful feature and needs to be handled carefully to avoid security risks (e.g., command injection if not sanitized properly).
+      * **Mechanism:**
+          * A prefix like ` !  ` or `$` (e.g., `! ls -la` or `$ uptime`).
+          * Use `std::process::Command` to execute the command.
+          * Decide whether to run it in a detached process or capture output to display in your app.
+        <!-- end list -->
+        ```rust
+        // Example (simplified, needs more robust error handling and security)
+        use std::process::Command;
+
+        async fn execute_bash_command(command_str: &str) -> Result<String, String> {
+            // Basic split, consider shlex for proper parsing if complex commands are allowed
+            let parts: Vec<&str> = command_str.split_whitespace().collect();
+            if parts.is_empty() {
+                return Err("Empty command".to_string());
+            }
+
+            let cmd = parts[0];
+            let args = &parts[1..];
+
+            let output = Command::new(cmd)
+                .args(args)
+                .output();
+
+            match output {
+                Ok(out) => {
+                    if out.status.success() {
+                        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+                    } else {
+                        Err(String::from_utf8_lossy(&out.stderr).to_string())
+                    }
+                }
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        ```
+      * **Considerations:**
+          * Running commands that expect interactive input won't work well unless you embed a terminal.
+          * Displaying output: For simple commands, showing stdout/stderr in the results is fine. For long-running or complex output, consider opening a terminal.
+
+6.  **Auto-complete:**
+
+      * **Sources for Completion:**
+          * Executable names from `$PATH`.
+          * File paths.
+          * History of previous commands/searches.
+          * Keywords for modes (e.g., `ai:`, `z:`, `web:`).
+      * **Implementation:**
+          * Maintain lists of possible completions based on the current input.
+          * Use a fuzzy matching algorithm (e.g., `fuzzy-matcher` crate) to rank suggestions.
+          * Display suggestions as the user types.
+          * Allow `Tab` key to cycle through or select completions.
+
+**III. Configuration (Easy Iteration & Expansion)**
+
+  * **Format:** TOML is very popular in the Rust ecosystem and human-readable. `serde` is the go-to crate for serialization/deserialization.
+    ```rust
+    // Cargo.toml
+    // [dependencies]
+    // serde = { version = "1.0", features = ["derive"] }
+    // toml = "0.8"
+    ```
+    ```rust
+    // config.rs
+    use serde::Deserialize;
+
+    #[derive(Deserialize, Debug)]
+    pub struct Config {
+        pub web_search_prefix: Option<String>,
+        pub ai_prefix: Option<String>,
+        pub zoxide_prefix: Option<String>,
+        pub default_terminal: Option<String>,
+        // ... other settings
+    }
+
+    pub fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
+        let content = std::fs::read_to_string(path)?;
+        let config: Config = toml::from_str(&content)?;
+        Ok(config)
+    }
+    ```
+  * **What to Configure:**
+      * Keybindings.
+      * Theme (colors, fonts).
+      * Prefixes for different modes (web search, AI, zoxide).
+      * API keys (though environment variables are often better for sensitive keys).
+      * Default applications (e.g., terminal, file manager).
+      * Enable/disable features.
+
+**IV. Rofi Compatibility**
+
+This is the trickiest "must-have" if you mean *binary* or *plugin* compatibility.
+
+  * **Rofi's `dmenu` mode:** Rofi can emulate `dmenu`. If your application can also operate in a `dmenu`-compatible way (reading choices from stdin, writing selection to stdout), then scripts or tools expecting `dmenu` could use your application. This is a good starting point for compatibility.
+  * **Rofi Scripting/Modes:** Rofi has its own modes and scripting capabilities. True compatibility here would mean replicating Rofi's internal API or how it loads modes, which is a significant undertaking and might not be worth it if you're building something new from scratch.
+  * **"Inspired by" vs. "Drop-in replacement":** Focus on being "inspired by" Rofi's workflow and UI paradigm. Achieving feature parity and then considering `dmenu` mode compatibility is a more practical approach. Replicating Rofi's full plugin system would essentially be rewriting Rofi.
+
+**V. Gemini MCP Server on a Home Machine**
+
+When you say "MCP server for Gemini," it's important to clarify. The Gemini models themselves are massive and run on Google's infrastructure. You cannot host the Gemini model on your home machine.
+
+What you *can* do is create a **local intermediary server/service** that:
+
+1.  **Exposes a Local API:** Your launcher application talks to this local server.
+2.  **Manages Gemini API Key:** Securely stores and uses your Gemini API key for outgoing requests.
+3.  **Handles API Calls to Google:** Forwards requests to the actual Gemini API.
+4.  **Implements Caching:** Cache common requests/responses to save API calls and improve speed.
+5.  **Rate Limiting:** Manage calls to stay within Gemini API rate limits.
+6.  **Request/Response Transformation:** Adapt requests or responses if needed.
+
+<!-- end list -->
+
+  * **Practicality:**
+      * **Yes, this is practical and often a good idea for a home setup.**
+      * It can be a simple Rust web server using `actix-web`, `axum`, or `warp`.
+      * It centralizes your Gemini API logic.
+      * Your main launcher app becomes simpler as it just calls a local endpoint.
+  * **Not an "MCP" in the traditional sense:** You're not controlling the model's core operations, but rather managing your interaction with the API service.
+  * **Why do this?**
+      * If multiple local applications might use Gemini.
+      * To add a layer of custom logic, logging, or caching that's independent of your main launcher app.
+      * To potentially handle API key rotation or management more easily.
+
+**VI. Development Workflow & Iteration**
+
+1.  **Start Small:**
+      * Core UI shell (input field, results list).
+      * Basic static list of results.
+      * Keyboard navigation.
+2.  **Add One Feature at a Time:**
+      * Zoxide integration.
+      * Bash execution (simple version).
+      * Web search (basic).
+      * Gemini integration.
+3.  **Refine and Polish:**
+      * Improve UI/UX.
+      * Add configuration options.
+      * Implement robust error handling.
+      * Write tests.
+4.  **Configuration-Driven:** As you add features, think about how they can be toggled or customized via the config file. This makes it easier to expand later. For example, new "search providers" (like zoxide, Gemini, web) could potentially be defined or enabled/disabled in the config.
+
+**Project Structure (Example):**
+
+```
+wayfinder/
+├── Cargo.toml
+├── config.toml.example
+├── src/
+│   ├── main.rs         // Entry point, UI setup, event loop
+│   ├── ui.rs           // UI components, rendering logic
+│   ├── config.rs       // Configuration loading
+│   ├── providers/      // Modules for different search sources
+│   │   ├── mod.rs
+│   │   ├── zoxide_provider.rs
+│   │   ├── web_provider.rs
+│   │   ├── ai_provider.rs
+│   │   └── command_provider.rs
+│   ├── commands.rs     // Bash command execution logic
+│   └── utils.rs        // Helper functions
+└── local_gemini_proxy/ (Optional, separate Rust project)
+    ├── Cargo.toml
+    └── src/
+        └── main.rs
+```
+
+**Key Technologies to Research/Use:**
+
+  * **Rust:** The language itself.
+  * **Wayland Client Libraries:** `winit`, `smithay-client-toolkit`.
+  * **GUI Toolkits (if not pure Wayland):** `iced`, `slint`, `gtk-rs`.
+  * **TUI Libraries (if that route):** `ratatui`.
+  * **Asynchronous Runtime:** `tokio` or `async-std`.
+  * **HTTP Client:** `reqwest`.
+  * **Serialization/Deserialization:** `serde` (with `toml`).
+  * **Fuzzy Matching:** `fuzzy-matcher`.
+  * **Command Execution:** `std::process::Command`.
+  * **Wayland Protocols:** `wayland-protocols`, especially `wlr-layer-shell-unstable-v1.xml` for the overlay behavior.
+
+This is a substantial but very rewarding project. By breaking it down and focusing on one piece at a time, you can definitely build an impressive and useful tool. Good luck\!
+Okay, this is a fantastic and ambitious project\! Building a custom, AI-enhanced launcher for Wayland/Hyprland in Rust is definitely a powerful tool to have. Let's break down the requirements and outline a path forward.
+
+Given the current date (May 2025), the Rust ecosystem for Wayland development is reasonably mature, offering several viable options.
+
+**Project Vision: "CogniLaunch" (or your preferred name)**
+
+A Rofi/Alfred-inspired launcher for Wayland that's fast, configurable, and intelligent, with deep integration for developers and power users.
+
+**I. Core Application Framework (Rust on Wayland/Hyprland)**
+
+You're aiming for a highly responsive overlay, which is key for a launcher.
+
+  * **Windowing & Rendering for Wayland:**
+
+      * **Key Protocol: `wlr-layer-shell-unstable-v1`**: This Wayland protocol is essential. It allows your application to act as a "layer surface" (like a panel or an overlay like Rofi) that can be positioned on edges, span across outputs, receive keyboard focus exclusively when visible, etc. Hyprland fully supports this.
+      * **Rust Libraries for Wayland Client Development:**
+        1.  **`winit` + Renderer:**
+              * `winit`: A popular cross-platform window creation library with good Wayland support. You'd use it to create your window.
+              * Renderer: You'll need to draw your UI.
+                  * **`softbuffer`**: Allows you to draw pixel by pixel into a buffer displayed in a `winit` window. Good for simple, custom UIs without a heavy GUI framework.
+                  * GPU-accelerated: For smoother animations and more complex UIs, you could integrate with something like `wgpu` (graphics API abstraction) or a 2D graphics library like `piet`, `raqote`, or even Skia (via Rust bindings if available and suitable).
+        2.  **GUI Toolkits with Wayland Support:**
+              * **`iced`**: A data-centric, Elm-inspired GUI library for Rust. It's gaining maturity and has Wayland support. Its declarative nature could align well with your desire for easy iteration.
+              * **`slint`**: A declarative GUI toolkit with its own markup language. It's designed to be lightweight and embeddable, with good Rust integration and Wayland support. It's a strong candidate for this type of application.
+              * **`egui`**: An immediate mode GUI library. It's known for its ease of integration. You can use it with `winit` and a suitable backend (like `egui_wgpu` or `egui_glow`).
+              * **`gtk-rs`**: Rust bindings for GTK. GTK4 has excellent Wayland support and is very mature. This is a heavier option but provides many widgets out-of-the-box.
+        3.  **TUI (Terminal User Interface) - Alternative Approach:**
+              * Libraries: `ratatui` (the community fork of `tui-rs`) is excellent.
+              * How it works: You'd run your application in a dedicated, minimal terminal emulator window configured for transparency (via compositor like Hyprland) and borderless display. This is simpler for UI logic initially but can be harder to make feel as "slick" or integrated as a native graphical overlay. Keyboard grabbing and positioning also rely more on the terminal emulator and window manager rules.
+
+  * **Recommendation for UI:**
+
+      * **For a native graphical feel:**
+          * **`slint`** or **`iced`** are strong contenders if you prefer a declarative, Rust-first approach.
+          * **`winit` + `softbuffer` (or a 2D graphics lib)** if you want maximum control and a very lightweight solution, and are comfortable building UI components from scratch.
+          * **`egui`** if you prefer immediate mode and rapid prototyping.
+      * A **TUI with `ratatui`** is viable, especially in tiling environments like Hyprland, but it will have a distinct aesthetic.
+
+**II. Feature Implementation Strategy**
+
+1.  **Rofi/Alfred-Inspired Search Bar (Core UX):**
+
+      * **Layout:** Input field at the top, scrollable list of results below.
+      * **Input Handling:** Capture keystrokes, update search results dynamically.
+      * **Navigation:** Up/Down arrows to select, Enter to execute, Esc to close.
+      * **Asynchronous Operations:** All potentially blocking operations (file system search, web requests, AI calls) *must* be asynchronous using Rust's `async/await` (e.g., with `tokio` or `async-std`) to keep the UI responsive.
+
+2.  **Zoxide Integration (Fuzzy Directory Finding):**
+
+      * **How:** Your application will call the `zoxide` command-line tool.
+      * **Rust Code:** Use `std::process::Command` to run `zoxide query <search-terms>`.
+        ```rust
+        use std::process::Command;
+        use tokio::process::Command as TokioCommand; // For async
+
+        async fn query_zoxide(terms: &str) -> Result<String, std::io::Error> {
+            let output = TokioCommand::new("zoxide")
+                .arg("query")
+                .arg(terms)
+                .output()
+                .await?; // Use await for async execution
+
+            if output.status.success() {
+                Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            } else {
+                Err(std::io::Error::new(
+                    std.io::ErrorKind::Other,
+                    String::from_utf8_lossy(&output.stderr),
+                ))
+            }
+        }
+        ```
+      * **Display:** List matching directories. Action: Open in file manager or terminal.
+
+3.  **Web Search & Quick Answers:**
+
+      * **Activation:** A prefix like `web: query` or automatic detection.
+      * **Backend for Quick Answers:**
+          * **DuckDuckGo API:** Its Instant Answer API (Zero-click Info) is good for this. Use `reqwest` to call `https://api.duckduckgo.com/?q=YOUR_QUERY&format=json&pretty=1`.
+          * **Wikipedia API:** For summaries.
+          * **Dedicated APIs:** For weather (e.g., OpenWeatherMap), translations (see Gemini below), sports scores.
+          * **Gemini:** You can prompt Gemini for quick answers: "What's the current score of the Manchester United game?" or "Weather in London?".
+      * **Rust Code:** `reqwest` for HTTP calls, `serde_json` for parsing JSON responses.
+      * **Display:** Show quick answers prominently at the top of the results.
+
+4.  **AI Mode (Gemini Integration):**
+
+      * **Activation:** A prefix like `ai: your prompt` or a dedicated mode.
+      * **Gemini API Key:** Store securely (environment variable, GNOME Keyring/KWallet, or encrypted config).
+      * **Rust Code:**
+          * Use `reqwest` to make POST requests to the Gemini API endpoint (e.g., `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=YOUR_API_KEY`).
+          * Construct the JSON payload according to Gemini API docs.
+          * Handle responses, including streaming if you want progressive output.
+          * Parse the JSON response (likely using `serde_json`).
+        <!-- end list -->
+        ```rust
+        // Simplified example structure for calling Gemini
+        use reqwest::Client;
+        use serde::{Deserialize, Serialize};
+        // Define structs for Gemini request and response based on API docs
+        // async fn call_gemini(api_key: &str, prompt: &str) -> Result<String, reqwest::Error> {
+        //     let client = Client::new();
+        //     let api_url = format!("https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={}", api_key);
+        //     // Construct your JSON body
+        //     let response = client.post(&api_url).json(&/* your request payload */).send().await?;
+        //     let result_text = response.text().await?; // Or .json::<YourResponseType>()
+        //     Ok(result_text)
+        // }
+        ```
+      * **Display:** Show AI responses in the results list, potentially with Markdown rendering if your UI supports it.
+
+5.  **Execute Bash Commands:**
+
+      * **Activation:** A prefix like `! cmd` or `$ cmd`.
+      * **Security:** This is critical. Avoid directly concatenating user input into a shell string.
+          * Best: Execute the command and its arguments directly, not through a shell.
+          * `std::process::Command` (or `tokio::process::Command` for async):
+            ```rust
+            async fn execute_command(full_command: &str) -> Result<String, String> {
+                let mut parts = full_command.trim().split_whitespace();
+                let command = match parts.next() {
+                    Some(c) => c,
+                    None => return Err("Empty command".to_string()),
+                };
+                let args: Vec<&str> = parts.collect();
+
+                let output = TokioCommand::new(command)
+                    .args(args)
+                    .output()
+                    .await;
+
+                match output {
+                    Ok(out) => {
+                        if out.status.success() {
+                            Ok(String::from_utf8_lossy(&out.stdout).to_string())
+                        } else {
+                            Err(String::from_utf8_lossy(&out.stderr).to_string())
+                        }
+                    }
+                    Err(e) => Err(e.to_string()),
+                }
+            }
+            ```
+      * **Display:** Show command output (stdout/stderr) in the results or a dedicated view. Consider if you want to run it in an external terminal for interactive commands.
+
+6.  **Auto-complete:**
+
+      * **Sources:**
+          * Commands from `$PATH`.
+          * File/directory paths.
+          * Previous entries (history).
+          * Mode prefixes (`ai:`, `z:`, `web:`).
+          * Zoxide results as you type.
+      * **Implementation:**
+          * For input `foo`, if `f` is typed, suggest `foo`.
+          * Use a fuzzy finding library like `fuzzy-matcher` or `skim` (core algorithm) for more flexible matching.
+          * Update suggestions dynamically. `Tab` key to select/cycle.
+
+**III. Configuration (Easy Iteration & Expansion)**
+
+  * **Format:** TOML is excellent for Rust projects. Use `serde` for serialization/deserialization.
+      * `config.toml`:
+        ```toml
+        ai_prefix = "ai:"
+        zoxide_prefix = "z:"
+        web_search_prefix = "web:"
+        default_terminal = "kitty"
+
+        [theme]
+        background_color = "#282a36"
+        text_color = "#f8f8f2"
+        # ... more theme options
+        ```
+  * **Rust Code:**
+    ```rust
+    use serde::Deserialize;
+    use std::fs;
+
+    #[derive(Deserialize, Debug)]
+    struct ThemeConfig {
+        background_color: String,
+        text_color: String,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct Config {
+        ai_prefix: String,
+        zoxide_prefix: String,
+        web_search_prefix: String,
+        default_terminal: String,
+        theme: ThemeConfig,
+    }
+
+    pub fn load_config(path: &std::path::Path) -> Result<Config, Box<dyn std::error::Error>> {
+        let content = fs::read_to_string(path)?;
+        let config: Config = toml::from_str(&content)?;
+        Ok(config)
+    }
+    ```
+  * **Extensibility:** Design your core loop to iterate over "providers" (AI, zoxide, commands, web search, applications). A config file could define which providers are active and their specific settings/prefixes.
+
+**IV. Rofi Compatibility**
+
+This is nuanced. "Being compatible" can mean several things:
+
+1.  **`dmenu` mode compatibility:**
+      * Rofi can act as a `dmenu` replacement (`rofi -dmenu`). `dmenu` reads choices from stdin and writes the selected choice to stdout.
+      * You can implement a mode in your app that does this. This makes it a drop-in for scripts expecting `dmenu`. This is the most straightforward form of compatibility.
+2.  **Rofi Theme Compatibility:** Unlikely and very complex, as it would require parsing Rofi's theme format. Better to have your own theming.
+3.  **Rofi Plugin/Script Mode Compatibility:** Extremely difficult. Rofi has its own scripting language (and supports plugins). Replicating this is like rebuilding Rofi itself.
+4.  **"Inspired By":** This is your primary goal – similar workflow, UI paradigm.
+
+**Recommendation:** Aim for `dmenu` mode compatibility first. Focus on your unique features rather than full Rofi internal compatibility.
+
+**V. MCP Server for Gemini on a Home Machine**
+
+You likely don't mean hosting the actual Gemini *model* (which is enormous and proprietary to Google). You probably mean creating a **local proxy or intermediary service** for the Gemini API on your home network/machine.
+
+  * **Is this practical? Yes, and potentially useful.**
+  * **Why?**
+      * **Centralized API Key Management:** Your launcher (and other potential local apps) talks to this local proxy. The proxy securely stores and uses the Gemini API key.
+      * **Caching:** Implement caching for identical prompts to reduce API calls and costs, and speed up repeated queries.
+      * **Rate Limiting Logic:** Enforce custom rate limits before hitting Google's limits.
+      * **Request/Response Transformation/Logging:** Add custom logging or modify requests/responses.
+      * **Simplified Client Logic:** Your launcher app just makes a simple local HTTP request.
+  * **How?**
+      * Build a small web server in Rust using `axum`, `actix-web`, or `warp`.
+      * This server exposes an endpoint (e.g., `http://localhost:YOUR_PORT/gemini-proxy`).
+      * It receives prompts, forwards them to the actual Gemini API, and returns the response.
+  * **Considerations:**
+      * Security of the proxy itself if exposed to your local network.
+      * It's another process to manage.
+      * For a single-user desktop app, it might be slight overkill if the app itself can manage the API key and calls securely and efficiently, but it becomes more valuable if you envision other local tools using Gemini.
+
+**VI. Project Structure & Iteration**
+
+1.  **Core:**
+      * Basic Wayland window with `wlr-layer-shell`.
+      * Input field and an empty results list.
+      * Keyboard input handling (typing, Esc).
+2.  **Modules for Providers:** Create separate modules for each data source/action type:
+      * `application_provider.rs` (finding .desktop files)
+      * `zoxide_provider.rs`
+      * `command_provider.rs`
+      * `web_search_provider.rs`
+      * `ai_provider.rs`
+        Each provider could implement a common `trait SearchProvider` with an async `search(&self, query: &str) -> Vec<SearchResult>` method.
+3.  **Dispatcher:** The main logic takes input, queries relevant providers (based on prefix or general context), aggregates, and displays results.
+4.  **Configuration:** Integrate `config.rs` early on.
+5.  **Build and Test Incrementally:** Add one provider/feature at a time.
+
+This is a substantial but very cool project. Your programming experience will be a huge asset. Focus on getting a minimal viable product for the core Wayland overlay and input handling first, then layer in the features. Good luck\!
+Okay, this is a fantastic and ambitious project\! Building a custom launcher for Wayland/Hyprland in Rust, inspired by Rofi/Alfred and supercharged with Gemini, is a great goal for someone with your experience. Let's break this down into a structured plan.
+
+**I. Core Application Framework & UI (Rust on Wayland/Hyprland)**
+
+You need a lightweight, responsive UI that can act as an overlay.
+
+  * **Windowing on Wayland:**
+      * **`winit`**: This is a fundamental Rust library for creating windows and handling input events across platforms, including Wayland. It will be your base for interacting with the Wayland compositor. (Source: 15.1)
+      * **Wayland Layer Shell Protocol**: To achieve the Rofi-like overlay behavior (e.g., appearing at the top of the screen, not managed like a regular app window), you'll need to use the `wlr-layer-shell-unstable-v1` protocol. Libraries built on `winit` or full GUI toolkits often provide ways to interact with these protocols. `gtk4-layer-shell` is an example for GTK (Source: 1.1), and you'd look for similar capabilities or build them with `winit` and Wayland client libraries like `wayland-client`.
+  * **GUI Options (Rust):**
+      * **`iced`**: A data-centric, Elm-inspired GUI library. System76 is using it for their COSMIC desktop environment, which suggests growing maturity and Wayland support. It's MIT licensed. (Source: 11.2, 14.1) Its architecture is often praised. Some users find its code "messy," but others love the Elm pattern. (Source: 14.1) There's active work on improving it, including potential accessibility support.
+      * **`Slint`**: A declarative GUI toolkit with its own markup language (`.slint`). It aims to be lightweight and performant, with good Wayland support. It's known for good documentation and a 1.0 release, indicating production readiness. However, pay attention to its licensing (GPL v3 / commercial options / royalty-free for specific FOSS licenses). (Source: 11.1, 14.1) Some users have reported initial UI reveal lag in the past, but this seems to be improving. (Source: 14.1)
+      * **`egui`**: An immediate mode GUI library. It's often praised for being easy to get started with and quickly "slap some UI up." (Source: 11.1) It redraws continuously, which can be more CPU/GPU intensive but simplifies some programming models.
+      * **`GTK-rs` (`gtk4`)**: Provides Rust bindings for GTK4, which has excellent Wayland support. `gtk4-layer-shell` can be used for panels and desktop components. (Source: 1.1) GTK is mature and feature-rich. (Source: 11.2)
+      * **`Dioxus`**: If you like React-like development, Dioxus brings that to Rust for web and desktop. It's considered good for rich desktop experiences. (Source: 11.1, 11.2)
+      * **Direct `winit` + Renderer (e.g., `wgpu`, `skia`)**: This is the most low-level graphical approach, giving you maximum control but also requiring the most work to build UI components.
+  * **TUI (Terminal User Interface) Option:**
+      * **`ratatui`** (fork of `tui-rs`): An excellent library for building TUIs in Rust. (Source: 11.2, 12.1)
+      * **Considerations**: While possible, a TUI might feel less integrated for an Alfred/Rofi replacement unless carefully styled and launched in a borderless, transparent terminal window positioned as an overlay. Achieving seamless layer-shell behavior (like keyboard grabbing and consistent positioning) would be more complex than with a dedicated GUI Wayland client.
+  * **Recommendation:**
+      * For a polished, native-feeling Wayland overlay with a modern Rust approach: **`Slint`** or **`iced`** are strong choices. `Slint`'s declarative DSL might appeal to your desire for easy iteration, but check the license. `iced` is very promising due to its architecture and backing.
+      * If you want something very quick to get visuals up or prefer an immediate mode paradigm: `egui`.
+      * If you prefer a mature, widget-rich environment and are comfortable with GTK's paradigms: `gtk-rs`.
+
+**II. Feature Implementation Strategy**
+
+1.  **Rofi/Alfred-Inspired Search Bar (Core UI):**
+
+      * An input field for typing queries.
+      * A scrollable list to display results dynamically.
+      * Keyboard navigation (arrows, Enter, Esc).
+      * Asynchronous operations for non-blocking searches (Rust's `async/await` with `tokio` or `async-std`).
+
+2.  **Zoxide Integration (Fuzzy Directory Finding):**
+
+      * Execute `zoxide query <terms>` using `std::process::Command`. (Source: My previous explanation, general knowledge, 3.1 shows zoxide usage)
+      * Capture and parse the output asynchronously.
+      * Display directory results, potentially with an action to open in a file manager or terminal.
+
+3.  **Web Search & Quick Answers:**
+
+      * **Direct API for quick answers**:
+          * `duckduckgo_rs` crate for DuckDuckGo's API. (Source: 4.1) This is good for instant answers.
+          * Other APIs for weather, sports, etc. (Your Gemini API can also handle many of these).
+      * **Gemini for complex queries/answers**: Format prompts to Gemini for specific information.
+      * **Display**: Show quick answers prominently and directly in the results.
+
+4.  **AI Mode (Gemini Integration):**
+
+      * Use `reqwest` or a similar Rust HTTP client to interact with the Google Gemini API. (Source: 5.1 mentions the REST API).
+      * Securely manage your API key (environment variables or a secure config).
+      * Implement a specific prefix (e.g., ` ai:  `) to trigger this mode.
+      * Handle streaming responses if possible for better UX.
+      * Format and display AI responses.
+
+5.  **Execute Bash Commands:**
+
+      * **Security is paramount**: Sanitize input *rigorously* if you allow arbitrary commands. Using a library like `shlex` for quoting can help if you construct commands from parts. (Source: 6.2)
+      * Use `std::process::Command` to run commands.
+      * Consider prefixing commands (e.g., ` !  ` or ` $  `).
+      * Decide on output handling (display in-app or open a terminal).
+      * Avoid running user scripts directly without sandboxing if they are untrusted. For truly untrusted scripts, this is complex; embedded languages like Luau (with `mlua` and sandboxing) or WASM runtimes (`wasmtime`) are safer alternatives for scripting extensibility. (Source: 6.1) Since you are the primary user, the risk is lower if you're just executing your own commands.
+
+6.  **Auto-complete:**
+
+      * **Sources**: `$PATH` executables, file paths, command history, mode keywords.
+      * **Libraries/Techniques**:
+          * The `inquire` crate has an `Autocomplete` trait for CLIs, concepts from which could be adapted. (Source: 7.1)
+          * `egui_autocomplete` is available if using `egui`. (Source: 7.2)
+          * Fuzzy matching libraries like `fuzzy-matcher`.
+      * Display suggestions dynamically and allow selection (e.g., with Tab).
+
+**III. Configuration (Easy Iteration & Expansion)**
+
+  * **Format**: TOML is idiomatic in Rust.
+  * **Crates**: `serde` for deserialization, and `toml` to parse the file. (Source: 8.1 shows `basic_toml` which uses `serde`).
+  * **Configurable items**: Keybindings, themes, mode prefixes, API keys (though environment variables are often preferred for secrets), feature toggles.
+
+**IV. Rofi Compatibility**
+
+  * **"Inspired by"**: This is the most feasible goal. Replicate the workflow and UI paradigms.
+  * **`dmenu` mode**: Rofi can act as a `dmenu` replacement. If your application can also read choices from stdin and write the selection to stdout, it can be a drop-in for scripts expecting `dmenu`. This is a good, achievable level of compatibility. (Source: 2.1, 2.2)
+  * **Full Rofi plugin/mode compatibility**: This would essentially mean reimplementing Rofi's internal APIs, a very large task. Focus on feature parity first.
+  * **Alternatives to Rofi on Wayland**: `fuzzel` is often mentioned as a good Wayland alternative and supports `dmenu` mode. (Source: 2.1, 2.2, 13.1) `wofi` is another GTK-based option. (Source: 13.1) Understanding how these work, especially with layer shell and `dmenu` emulation, can be insightful.
+
+**V. Gemini "MCP Server" on a Home Machine**
+
+You cannot host the core Gemini models themselves locally. What you're likely thinking of is a **local intermediary service/proxy** for your Gemini API key.
+
+  * **Purpose**:
+      * Securely store and manage your Gemini API key.
+      * Centralize API logic (e.g., if multiple local apps were to use it).
+      * Implement caching to reduce API calls and costs.
+      * Handle rate limiting.
+      * Transform requests/responses if needed.
+  * **Feasibility**: **Yes, this is practical and can be a good idea.**
+      * Build it as a small Rust web server (e.g., using `actix-web`, `axum`, or `warp`).
+      * Your launcher application then calls this local proxy.
+      * There are examples of local proxies for Gemini, even as VS Code extensions, to manage API keys and requests. (Source: 10.1, 10.2)
+  * This isn't an "MCP" (Model Control Program) in the sense of controlling the AI model itself, but rather a smart client or gateway.
+
+**VI. Project Development Steps & Advice**
+
+1.  **Foundation**:
+      * Choose your GUI toolkit/approach (`iced`, `slint`, `egui`, `gtk-rs`, or `winit`+renderer).
+      * Implement the basic window that can act as a layer shell surface.
+      * Create the input field and a simple, static list for results.
+      * Basic keyboard input (typing, Esc to close).
+2.  **Core Logic Loop**:
+      * Implement the main loop that takes input, queries providers, and updates the results list asynchronously.
+3.  **Integrate Providers One by One**:
+      * Start with `zoxide`.
+      * Then application launching (scanning `.desktop` files).
+      * Then bash commands (with caution).
+      * Web search / quick answers.
+      * Finally, Gemini AI mode.
+4.  **Auto-completion**: Add this once basic input and display are working.
+5.  **Configuration**: Introduce `serde` and TOML for configuration early on, so you can easily tweak settings as you develop.
+6.  **Local Gemini Proxy (Optional but Recommended)**: Develop this as a separate small service if you want the benefits mentioned above.
+7.  **Refine**: Focus on UX, performance, error handling, and theming.
+
+**Key Rust Crates & Technologies Summary:**
+
+  * **Windowing/Wayland**: `winit`, `wayland-client`, `wayland-protocols` (for layer shell).
+  * **GUI**: `iced`, `slint`, `egui`, `gtk-rs`, `dioxus`.
+  * **TUI**: `ratatui`.
+  * **Async**: `tokio` or `async-std`.
+  * **HTTP Client**: `reqwest`.
+  * **Serialization**: `serde`, `toml`.
+  * **Command Execution**: `std::process::Command`.
+  * **Fuzzy Finding (for completion logic)**: `fuzzy-matcher`.
+  * **Wayland Launchers for Inspiration**: `rofi` (Wayland fork), `fuzzel`, `wofi`, `tofi`. (Source: 1.1, 2.1, 2.2, 13.1)
+
+This project has many exciting components. By tackling them incrementally and leveraging the strong Rust ecosystem, you can create a powerful and personalized tool. Good luck\!

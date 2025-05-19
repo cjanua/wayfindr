@@ -408,9 +408,6 @@ mod ui_rendering_tests {
         // assert_eq!(line0_via_helper, ">", "Helper function after trim_end should yield '>'. Got: '{}'", line0_via_helper);
     }
 
-    // ... other tests in ui_rendering_tests (test_ui_renders_loading_message_in_output, etc.) remain unchanged ...
-    // Make sure they were passing with the .trim_end() version of get_rendered_string_at_line
-
     #[test]
     fn test_ui_renders_loading_message_in_output() {
         let mut app = new_app();

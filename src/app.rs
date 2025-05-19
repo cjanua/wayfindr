@@ -1,3 +1,4 @@
+// src/app.rs
 use crate::types::{ActionResult, AppError};
 use crate::utils::LOG_TO_FILE;
 use crate::process_execution; // For launching kitty for cd

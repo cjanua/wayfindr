@@ -1,6 +1,7 @@
 // src/types.rs
 #![allow(dead_code)]
 use thiserror::Error;
+use crate::services::ai::AiError; // Importing AiError for the new variant
 
 #[derive(Debug, Clone)]
 pub struct ActionResult {
@@ -13,8 +14,7 @@ pub struct ActionResult {
 #[derive(Debug, Clone)]
 pub enum AsyncResult {
     PathSearchResult(Vec<ActionResult>),
-    AnotherProcessResult(String), // Example, if you add more async task types
-    YetAnotherResult(i32),       // Example
+    AiResponse(String),
     Error(String),
 }
 
@@ -28,4 +28,8 @@ pub enum AppError {
     ActionError(String),
     #[error("CLI argument error: {0}")] // Example, if cli.rs needs its own error
     CliError(String),
+    #[error("AI service error: {0}")] // New variant for AI errors
+    AiService(#[from] AiError),
+    #[error("Configuration error: {0}")] // Example for config errors
+    ConfigError(String),
 }

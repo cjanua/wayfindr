@@ -1,3 +1,4 @@
+// src/cli.rs
 use std::path::PathBuf;
 use clap::Parser;
 use crate::utils::{DEFAULT_LOG_FILE_PATH};

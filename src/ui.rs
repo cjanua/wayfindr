@@ -1,3 +1,5 @@
+// src/ui.rs
+
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, List, ListItem, Paragraph},

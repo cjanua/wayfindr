@@ -1,3 +1,5 @@
+// src/terminal.rs
+
 use std::io::stdout;
 use anyhow::{Context, Result as AnyhowResult};
 use crossterm::{

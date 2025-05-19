@@ -1,3 +1,4 @@
+// src/main.rs
 use std::io::{Stdout};
 use std::time::Duration;
 use tokio::sync::mpsc as tokio_mpsc;
@@ -16,11 +17,15 @@ mod ui;
 mod utils;
 mod terminal;
 mod spawners;
+mod services;
 
-use types::{AppError, AsyncResult};
+use types::{ActionResult, AppError, AsyncResult};
 use app::{App, FocusBlock};
 use utils::LOG_TO_FILE;
-use spawners::path_search::spawn_path_search;
+use spawners::{
+    path_search::spawn_path_search,
+    ai_query::spawn_ai_query,
+};
 
 #[cfg(test)]
 mod tests;
@@ -114,26 +119,57 @@ async fn run_app_loop(
                                 FocusBlock::Input => {
                                     let query = app.input.trim().to_string();
                                     if !query.is_empty() {
-                                        if app.history.is_empty() || app.history[0] != query { app.history.insert(0, query.clone());}
+                                        // Add to history (if not a duplicate of the last one)
+                                        if app.history.is_empty() || app.history[0] != query {
+                                            app.history.insert(0, query.clone());
+                                        }
                                         if app.history.len() > 16 { app.history.pop(); }
-                                        app.input.clear(); app.clear_prev(); app.history_index = None;
-                                        spawn_path_search(query, sender.clone());
-                                        app.is_loading = true;
-                                    } else if !app.output.is_empty() { app.focus = FocusBlock::Output; /* Then fall through to Output case implicitly if desired, or handle directly */ }
+                                        
+                                        app.input.clear();
+                                        app.clear_prev(); // Clear previous output/errors
+                                        app.history_index = None;
+                                        app.is_loading = true; // Set loading true
+
+                                        // Check for AI command prefix
+                                        if query.to_lowercase().starts_with("ai:") || query.to_lowercase().starts_with("ask:") {
+                                            let ai_prompt_content = query.split_at(query.find(':').unwrap_or(0) + 1).1.trim().to_string();
+                                            if !ai_prompt_content.is_empty() {
+                                                LOG_TO_FILE(format!("[AI_TRIGGER] Spawning AI query for: {}", ai_prompt_content));
+                                                spawn_ai_query(ai_prompt_content, sender.clone());
+                                            } else {
+                                                app.err_msg = "AI query is empty.".to_string();
+                                                app.is_loading = false;
+                                            }
+                                        } else {
+                                            // Default to path search
+                                            spawn_path_search(query, sender.clone());
+                                        }
+                                    } else if !app.output.is_empty() { // Input empty, try to activate selected output
+                                        app.focus = FocusBlock::Output; 
+                                        // The logic below for FocusBlock::Output will handle it in the next iteration if not immediate.
+                                        // To make it immediate, you could replicate the FocusBlock::Output logic here or refactor.
+                                        // For now, simply changing focus might be enough if user presses Enter again.
+                                    }
                                 }
                                 FocusBlock::Output => {
                                     if let Some(selected_action) = app.output.get(app.selected_output_index).cloned() { // Clone to avoid borrow issues
                                         LOG_TO_FILE(format!("[ACTION_EXEC] Queuing: {:?}", selected_action.description));
-                                        match app.handle_action_execution(&selected_action).await {
-                                            Ok(_) => {
-                                                LOG_TO_FILE("[ACTION_EXEC] handle_action_execution successful.".to_string());
-                                                if selected_action.action == "cd" { app.exit_flag = true; }
-                                                else { app.output.clear(); app.err_msg.clear(); app.selected_output_index = 0; app.focus = FocusBlock::Input; }
-                                            }
-                                            Err(e) => {
-                                                LOG_TO_FILE(format!("[ACTION_EXEC] handle_action_execution failed: {:?}", e));
-                                                app.err_msg = format!("Action failed: {}", e); // Use error message from AppError
-                                                app.focus = FocusBlock::Input;
+                                        if selected_action.spawner == "AI" {
+                                            // Maybe copy to clipboard or do nothing further.
+                                            LOG_TO_FILE(format!("[ACTION_EXEC] Selected an AI response. No further action defined yet. Text: {}", selected_action.description));
+                                            app.focus = FocusBlock::Input; // Optionally return to input
+                                        } else  {
+                                            match app.handle_action_execution(&selected_action).await {
+                                                Ok(_) => {
+                                                    LOG_TO_FILE("[ACTION_EXEC] handle_action_execution successful.".to_string());
+                                                    if selected_action.action == "cd" { app.exit_flag = true; }
+                                                    else { app.output.clear(); app.err_msg.clear(); app.selected_output_index = 0; app.focus = FocusBlock::Input; }
+                                                }
+                                                Err(e) => {
+                                                    LOG_TO_FILE(format!("[ACTION_EXEC] handle_action_execution failed: {:?}", e));
+                                                    app.err_msg = format!("Action failed: {}", e); // Use error message from AppError
+                                                    app.focus = FocusBlock::Input;
+                                                }
                                             }
                                         }
                                     } else { app.focus = FocusBlock::Input; }
@@ -142,10 +178,23 @@ async fn run_app_loop(
                                     if let Some(index) = app.history_index {
                                         if index < app.history.len() {
                                             app.input = app.history[index].clone();
-                                            let query = app.input.trim().to_string();
+                                            let query_from_history = app.input.trim().to_string();
                                             app.history_index = None; app.focus = FocusBlock::Input;
-                                            if !query.is_empty() {
-                                                app.clear_prev(); spawn_path_search(query, sender.clone()); app.is_loading = true;
+
+                                            if !query_from_history.is_empty() {
+                                                app.clear_prev(); app.is_loading = true;
+                                                // Also check for AI prefix from history
+                                                if query_from_history.to_lowercase().starts_with("ai:") || query_from_history.to_lowercase().starts_with("ask:") {
+                                                    let ai_prompt_content = query_from_history.split_at(query_from_history.find(':').unwrap_or(0) + 1).1.trim().to_string();
+                                                    if !ai_prompt_content.is_empty() {
+                                                        spawn_ai_query(ai_prompt_content, sender.clone());
+                                                    } else {
+                                                        app.err_msg = "AI query from history is empty.".to_string();
+                                                        app.is_loading = false;
+                                                    }
+                                                } else {
+                                                    spawn_path_search(query_from_history, sender.clone());
+                                                }
                                             }
                                         }
                                     } else { app.focus = FocusBlock::Input; }
@@ -158,9 +207,9 @@ async fn run_app_loop(
                                 app.history_index = Some(idx); app.input = app.history[idx].clone();
                             },
                             FocusBlock::Output => if app.selected_output_index > 0 { app.selected_output_index -= 1; },
-                            FocusBlock::History => if !app.history.is_empty() {
-                                let idx = app.history_index.map_or(0, |i| (i + 1).min(app.history.len()-1));
-                                app.history_index = Some(idx); app.input = app.history[idx].clone();
+                            FocusBlock::History => if let Some(idx) = app.history_index {
+                                if idx > 0 { app.history_index = Some(idx-1); app.input = app.history[idx-1].clone(); }
+                                else { app.history_index = None; app.input.clear(); }
                             },
                         },
                         KeyCode::Down => match app.focus {
@@ -169,9 +218,9 @@ async fn run_app_loop(
                                 else { app.history_index = None; app.input.clear(); }
                             },
                             FocusBlock::Output => if !app.output.is_empty() && app.selected_output_index < app.output.len() - 1 { app.selected_output_index += 1; },
-                            FocusBlock::History => if let Some(idx) = app.history_index {
-                                if idx > 0 { app.history_index = Some(idx-1); app.input = app.history[idx-1].clone(); }
-                                else { app.history_index = None; app.input.clear(); }
+                            FocusBlock::History => if !app.history.is_empty() {
+                                let idx: usize = app.history_index.map_or(0, |i| (i + 1).min(app.history.len()-1));
+                                app.history_index = Some(idx); app.input = app.history[idx].clone();
                             },
                         },
                         _ => { /* app.err_msg = format!("Unhandled key: {:?}", key.code); */ } // Potentially noisy
@@ -189,10 +238,26 @@ async fn run_app_loop(
                         app.output = results; app.err_msg.clear(); app.selected_output_index = 0;
                         app.focus = if app.output.is_empty() { FocusBlock::Input } else { FocusBlock::Output };
                     }
+                    AsyncResult::AiResponse(response_text) => { // Handle AI Response
+                        if response_text.contains("[INVALID]") {
+                            app.err_msg = "AI couldn't figure it out.".to_string();
+                            app.focus = FocusBlock::Input;
+                        } else {
+                            app.err_msg.clear();
+                            app.output = vec![ActionResult {
+                                spawner: "AI".to_string(),
+                                action: "".to_string(),
+                                description: response_text,
+                                data: "".to_string(), // No specific data for action execution
+                            }];
+                            app.selected_output_index = 0;
+                            app.focus = FocusBlock::Output; // Focus on the AI response
+                        }
+                    }
                     AsyncResult::Error(err_text) => {
                         app.clear_prev(); app.err_msg = err_text; app.focus = FocusBlock::Input;
                     }
-                    _ => { app.clear_prev(); app.err_msg = "Received unexpected async result.".to_string(); app.focus = FocusBlock::Input; }
+                    // _ => { app.clear_prev(); app.err_msg = "Received unexpected async result.".to_string(); app.focus = FocusBlock::Input; }
                 }
             }
             Err(tokio_mpsc::error::TryRecvError::Empty) => {}

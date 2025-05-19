@@ -13,17 +13,19 @@ pub struct ActionResult {
 #[derive(Debug, Clone)]
 pub enum AsyncResult {
     PathSearchResult(Vec<ActionResult>),
-    AnotherProcessResult(String),
-    YetAnotherResult(i32),
+    AnotherProcessResult(String), // Example, if you add more async task types
+    YetAnotherResult(i32),       // Example
     Error(String),
 }
 
 #[derive(Error, Debug)]
 pub enum AppError {
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] std::io::Error), // Useful for errors from process_execution
     #[error("Terminal error")]
-    TerminalError,
+    TerminalError, // For crossterm related issues
     #[error("Action execution error: {0}")]
     ActionError(String),
+    #[error("CLI argument error: {0}")] // Example, if cli.rs needs its own error
+    CliError(String),
 }

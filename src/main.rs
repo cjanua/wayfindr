@@ -1,7 +1,13 @@
 // src/main.rs
-use std::{fs::OpenOptions, io::{stdout, Stdout, Write}, time::SystemTime};
+use std::{
+    fs::OpenOptions,
+    io::{stdout, Stdout, Write},
+    path::PathBuf,
+    time::{SystemTime, Duration},
+    process::Command as StdCommand, // For spawning new terminal
+};
+use clap::Parser;
 use tokio::sync::mpsc as tokio_mpsc;
-use std::time::Duration;
 
 use anyhow::{Context, Result as AnyhowResult};
 
@@ -15,7 +21,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 use ratatui::widgets::{List, ListItem}; // Add List and ListItem
-use std::process::Command as StdCommand; // For spawning new termina
 
 mod types;
 use types::{ActionResult, AppError, AsyncResult};
@@ -26,6 +31,14 @@ use spawners::path_search::spawn_path_search;
 #[cfg(test)]
 mod tests;
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct CliArgs {
+    #[arg(long, value_name = "FILE_PATH", num_args = 0..=1, value_hint = clap::ValueHint::FilePath)]
+    logs: Option<Option<PathBuf>>
+}
+
+
 #[derive(Debug)]
 enum FocusBlock {
     Input,
@@ -33,20 +46,19 @@ enum FocusBlock {
     History,
 }
 
+const DEFAULT_LOG_FILE_PATH: &str = "/tmp/wayfindr_action.log_robust";
+
 static LOG_TO_FILE: fn(String) = |message: String| {
-    let log_file_path = "/tmp/wayfindr_action.log_robust"; // Use a new, distinct name for this test
-    match OpenOptions::new().create(true).append(true).open(log_file_path) {
+    match OpenOptions::new().create(true).append(true).open(DEFAULT_LOG_FILE_PATH) {
         Ok(mut file) => {
             let time_now = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            // If writeln! fails, we do nothing here to avoid any terminal I/O.
             let _ = writeln!(file, "[{}] {}", time_now, message);
         }
         Err(_) => {
             // If opening the log file fails, also do nothing.
-            // This prevents any eprintln! from interfering with the TUI.
         }
     }
 };
@@ -85,9 +97,6 @@ impl App {
     }
 
     async fn execute_action(&self, action_result: &ActionResult) -> Result<(), AppError> {
-        // File logging
-        
-    
         LOG_TO_FILE(format!(
             "[ACTION] Attempting to execute: spawner='{}', action='{}', data='{}'",
             action_result.spawner, action_result.action, action_result.data
@@ -99,157 +108,37 @@ impl App {
                     let path_to_cd = &action_result.data;
                     LOG_TO_FILE(format!("Attempting to open terminal at: {}", path_to_cd));
     
-                    #[cfg(target_os = "linux")]
-                    {
-                        let path_escaped_for_shell_arg = path_to_cd.replace("'", r"'\''");
-                        LOG_TO_FILE(format!("[DEBUG] Original path: {}", path_to_cd));
-                        LOG_TO_FILE(format!(
-                            "[DEBUG] Path escaped for shell argument: {}",
-                            path_escaped_for_shell_arg
-                        ));
-    
-                        let mut success = false;
-                        let attempts = [
-                            ("kitty", "CwdExecShell", vec!["@", "launch", "--cwd"]),
-                            ("xfce4-terminal", "WorkDirExecShell", vec!["--working-directory"]),
-                            ("lxterminal", "WorkDirExecShell", vec!["--working-directory"]),
-                            ("terminator", "WorkDirExecShell", vec!["--working-directory"]),
-                            ("gnome-terminal", "ShellCommandWrapper", vec!["--", "bash", "-c"]),
-                            ("konsole", "ShellCommandWrapper", vec!["-e", "bash", "-c"]),
-                            ("xterm", "ShellCommandWrapper", vec!["-e", "bash", "-c"]),
-                            ("alacritty", "ShellCommandWrapper", vec!["-e", "bash", "-c"]),
-                            ("xfce4-terminal", "DirectCommandAppend", vec!["--command="]),
-                        ];
-    
-                        for (term_exe, setup_type, base_args) in &attempts {
-                            LOG_TO_FILE(format!("\n[DEBUG] === Trying: {} ===", term_exe));
-                            let mut cmd = StdCommand::new(term_exe);
-                            let shell_to_launch = "bash"; 
-    
-                            match *setup_type {
-                                "CwdExecShell" => {
-                                    cmd.args(base_args);
-                                    cmd.arg(&path_escaped_for_shell_arg);
-                                    cmd.arg(shell_to_launch);
-                                }
-                                "WorkDirExecShell" => {
-                                    cmd.args(base_args);
-                                    cmd.arg(&path_escaped_for_shell_arg);
-                                    cmd.arg("-e"); // Common execute flag
-                                    cmd.arg(shell_to_launch);
-                                }
-                                "ShellCommandWrapper" => {
-                                    cmd.args(base_args);
-                                    let shell_command_str = format!(
-                                        "cd '{}' && exec {}",
-                                        &path_escaped_for_shell_arg, shell_to_launch
-                                    );
-                                    LOG_TO_FILE(format!(
-                                        "[DEBUG] Shell command string for wrapper: [{}]",
-                                        shell_command_str
-                                    ));
-                                    cmd.arg(&shell_command_str);
-                                }
-                                "DirectCommandAppend" => {
-                                    // This requires the shell_command_str to be doubly quoted if it contains spaces/special chars
-                                    let inner_shell_command = format!(
-                                        "cd '{}' && exec {}",
-                                        &path_escaped_for_shell_arg, shell_to_launch
-                                    );
-                                    let outer_command_for_bash = format!("bash -c \"{}\"", inner_shell_command.replace("\"", "\\\""));
-                                    let arg_with_command = format!("{}{}", base_args[0], outer_command_for_bash); // base_args[0] is like "--command="
-                                    LOG_TO_FILE(format!(
-                                        "[DEBUG] Argument for DirectCommandAppend: [{}]",
-                                        arg_with_command
-                                    ));
-                                    cmd.arg(&arg_with_command);
-                                }
-                                _ => {
-                                    LOG_TO_FILE(format!("[DEBUG] Unknown setup_type: {}", setup_type));
-                                    continue;
-                                }
-                            }
-    
-                            let final_program_str = format!("{:?}", cmd.get_program());
-                            let final_args_str_vec: Vec<String> = cmd
-                                .get_args()
-                                .map(|arg| format!("{:?}", arg.to_string_lossy()))
-                                .collect();
+                    let escaped_path = path_to_cd.replace("'", r"'\''");
+                    let shell_command = format!("cd '{}' && exec $SHELL", escaped_path);
+                    LOG_TO_FILE(format!("[execute_action] Shell command for Kitty: {}", shell_command));
+
+                    let mut cmd = StdCommand::new("kitty");
+                    cmd.arg("-e");    // Tells kitty to execute the following command
+                    cmd.arg("sh");    // The shell to use (sh is minimal and widely available)
+                    cmd.arg("-c");    // Tell sh to read commands from the next string argument
+                    cmd.arg(&shell_command);
+
+                    // Detach the process
+                    cmd.stdout(std::process::Stdio::null());
+                    cmd.stderr(std::process::Stdio::null());
+
+                    match cmd.spawn() {
+                        Ok(_) => {
                             LOG_TO_FILE(format!(
-                                "[DEBUG] Final command to spawn: {} {}",
-                                final_program_str,
-                                final_args_str_vec.join(" ")
-                            ));
-    
-                            match cmd.spawn() {
-                                Ok(_) => {
-                                    LOG_TO_FILE(format!(
-                                        "[INFO] spawn() call for '{}' returned Ok. Path: {}",
-                                        term_exe, path_to_cd
-                                    ));
-                                    success = true;
-                                    break; 
-                                }
-                                Err(e) => {
-                                    LOG_TO_FILE(format!("[DEBUG] Failed to spawn '{}': {}", term_exe, e));
-                                }
-                            }
-                        }
-    
-                        if !success {
-                            let err_msg = format!(
-                                "Failed to open any known terminal for path: {}. Please cd manually.",
+                                "[INFO] Kitty spawn() call returned Ok. Path: {}",
                                 path_to_cd
-                            );
-                            LOG_TO_FILE(format!("[ERROR] {}",err_msg));
-                            // You might want to set app.err_msg here to show it in the TUI
-                            // For example: app.err_msg = err_msg; (needs mutable app access or different error handling)
+                            ));
+                            // self.exit_flag = true; // If opening a new terminal means this app should exit
                         }
-                    }
-                    #[cfg(target_os = "macos")]
-                    {
-                        let path_escaped_for_osascript = path_to_cd.replace("'", r#"'\''"#);
-                        LOG_TO_FILE(format!("[DEBUG] macOS: Original path: {}", path_to_cd));
-                        LOG_TO_FILE(format!("[DEBUG] macOS: Path escaped for osascript: {}", path_escaped_for_osascript));
-    
-                        let script = format!(
-                            "tell application \"Terminal\"\n\
-                                \tdo script \"cd ''{}'' && clear\"\n\
-                                \tactivate\n\
-                            end tell",
-                            path_escaped_for_osascript
-                        );
-                        LOG_TO_FILE(format!("[DEBUG] macOS: osascript script:\n{}", script));
-                        match StdCommand::new("osascript").arg("-e").arg(&script).spawn() {
-                            Ok(_) => {
-                               LOG_TO_FILE(format!("[INFO] macOS: spawn() for osascript returned Ok. Path: {}", path_to_cd));
-                            }
-                            Err(e) => {
-                                LOG_TO_FILE(format!("[ERROR] macOS: Failed to spawn osascript for path {}: {}", path_to_cd, e));
-                            }
+                        Err(e) => {
+                            LOG_TO_FILE(format!("[ERROR] Failed to spawn Kitty for path {}: {}", path_to_cd, e));
+                            // Fallback or error message if needed
+                            // return Err(AppError::ActionError(format!("Failed to open Kitty: {}", e)));
+                            // For now, just log and continue, or attempt other terminals if you re-add that logic.
+                            // If Kitty is the primary target and fails, it's an error for this specific action.
+                            // We'll let the original error handling (if any) outside this function manage UI feedback.
+                             return Err(AppError::ActionError(format!("Failed to open Kitty (is it installed and in PATH?): {}. Path: {}", e, path_to_cd)));
                         }
-                    }
-                    #[cfg(target_os = "windows")]
-                    {
-                        LOG_TO_FILE(format!("[DEBUG] Windows: Original path: {}", path_to_cd));
-                        match StdCommand::new("cmd")
-                            .arg("/c")
-                            .arg("start")
-                            .arg("cmd.exe")
-                            .arg("/K")
-                            .arg(format!("cd /d \"{}\"", path_to_cd))
-                            .spawn() {
-                            Ok(_) => {
-                                LOG_TO_FILE(format!("[INFO] Windows: spawn() for cmd.exe returned Ok. Path: {}", path_to_cd));
-                            }
-                            Err(e) => {
-                                 LOG_TO_FILE(format!("[ERROR] Windows: Failed to spawn cmd.exe for path {}: {}", path_to_cd, e));
-                            }
-                        }
-                    }
-                    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-                    {
-                        LOG_TO_FILE(format!("[INFO] Simulated execution (unknown OS): cd \"{}\"", path_to_cd));
                     }
                     Ok(())
                 } else {
@@ -269,8 +158,6 @@ impl App {
             }
         }
     }
-
-
 }
 
 fn setup_terminal() -> AnyhowResult<()> {
@@ -297,24 +184,76 @@ fn restore_terminal() -> AnyhowResult<()> {
 
 #[tokio::main]
 async fn main() -> AnyhowResult<()> {
+    let cli_args = CliArgs::parse();
     // Prepare hook for panic handling
-    // This will ensure that the terminal is restored even if a panic occurs.    
-    let original_hook = std::panic::take_hook();
+    // This will ensure that the terminal is restored even if a panic occurs.
+    // --- Handle --logs flag ---
+    if let Some(option_for_path_or_default_signal) = cli_args.logs {
+        let log_file_to_view: PathBuf = match option_for_path_or_default_signal {
+            Some(specific_path) => specific_path, // User provided --logs /path/to/actual.log
+            None => PathBuf::from(DEFAULT_LOG_FILE_PATH), // User provided --logs (no value), use default
+        };
 
-    std::panic::set_hook(Box::new(move |panic_info| {
-        // Attempt to restore the terminal
-        if let Err(e) = restore_terminal() {
-            // If restoring fails, print the error to stderr.
-            // Printing to stdout might not work if it's still in raw mode.
-            Err::<(), AppError>(AppError::TerminalError)
-                .context(format!("Failed to restore terminal after panic {:?}", e))
-                .unwrap_err();
+        if !log_file_to_view.exists() {
+            eprintln!(
+                "Error: Log file not found at '{}'",
+                log_file_to_view.display()
+            );
+            eprintln!("Tip: The application writes logs to this file when actions are performed or if it's run without the --logs flag.");
+            return Ok(()); // Exit if log file doesn't exist
         }
-        // eprintln!("Panic occurred: {:?}", panic_info);
 
-        // Call the original panic hook, which prints the panic message and backtrace.
+        // Command to execute in Kitty: cat the log file, then start a shell
+        let shell_command = format!(
+            "cat '{}'; echo -e \"\n--- End of log. Press Ctrl+D or type 'exit' to close. ---\"; exec $SHELL",
+            log_file_to_view.to_string_lossy()
+        );
+
+        eprintln!( // Use eprintln for CLI output before TUI potentially starts
+            "Attempting to open logs from '{}' in Kitty...",
+            log_file_to_view.display()
+        );
+
+        let mut kitty_cmd = StdCommand::new("kitty");
+        kitty_cmd.arg("-e") // Tells kitty to execute the following command
+                 .arg("sh")   // The shell to use
+                 .arg("-c")   // Tell sh to read commands from string
+                 .arg(&shell_command);
+        
+        // Detach Kitty process
+        // kitty_cmd.stdout(std::process::Stdio::null());
+        // kitty_cmd.stderr(std::process::Stdio::null());
+
+
+        match kitty_cmd.spawn() {
+            Ok(_) => {
+                eprintln!("Kitty launched to display logs. The application will now exit.");
+                // Successfully launched Kitty, so we can exit the main program.
+            }
+            Err(e) => {
+                eprintln!("Error launching Kitty: {}", e);
+                eprintln!("Please ensure 'kitty' is installed and in your PATH.");
+                eprintln!("Falling back to printing log to stdout (first 50 lines):");
+                // Fallback: print some log content to stdout if Kitty fails
+                if let Ok(content) = std::fs::read_to_string(&log_file_to_view) {
+                    content.lines().take(50).for_each(|line| eprintln!("{}", line));
+                    if content.lines().count() > 50 {
+                        eprintln!("... (log truncated)");
+                    }
+                } else {
+                    eprintln!("Could not read log file for fallback.")
+                }
+            }
+        }
+        return Ok(()); // Exit after handling --logs
+    }
+
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let _ = restore_terminal(); // Attempt to restore, ignore error here
         original_hook(panic_info);
     }));
+
 
     // Setup terminal
     setup_terminal().context("Failed to setup terminal")?;
@@ -322,11 +261,15 @@ async fn main() -> AnyhowResult<()> {
     let mut app = App::new();
 
     let app_result = run_app(&mut terminal, &mut app).await;
-    if let Err(_e) = restore_terminal() {
-        // eprintln!("[main] FATAL: Failed to restore terminal: {:?}", e);
+    if let Err(e) = restore_terminal() {
+        // If TUI was running, errors here are tricky. eprintln might be garbled.
+        // For now, just log it to the file if possible.
+        LOG_TO_FILE(format!("[main] FATAL: Failed to restore terminal on exit: {:?}", e));
     }
 
+
     app_result.map_err(|app_err| {
+        LOG_TO_FILE(format!("[main] Error in main loop: {:?}", app_err));
         anyhow::anyhow!("Error in main loop: {:?}", app_err)
     })?;
 
@@ -348,8 +291,8 @@ async fn run_app(
 
         terminal.draw(|frame| ui(frame, app))?;
 
-        if event::poll(Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
+        if event::poll(Duration::from_millis(50)).map_err(|_e| AppError::TerminalError)? {
+            if let Event::Key(key) = event::read().map_err(|_e| AppError::TerminalError)? {
                 if key.kind == KeyEventKind::Press {
                     if matches!(app.focus, FocusBlock::Input) {
                         match key.code {
@@ -373,12 +316,27 @@ async fn run_app(
                                 FocusBlock::Input => {
                                     if !app.output.is_empty() {
                                         app.focus = FocusBlock::Output;
-                                        app.selected_output_index = 0; // Optionally reset
-                                    } else {
+                                        app.selected_output_index = 0;
+                                    } else if !app.history.is_empty() { // Only go to history if output is empty
                                         app.focus = FocusBlock::History;
+                                        // Initialize history_index if focusing history for the first time via Tab
+                                        if app.history_index.is_none() && !app.history.is_empty() {
+                                            app.history_index = Some(0); // Select first item
+                                            app.input = app.history[0].clone(); // And display it
+                                        }
                                     }
                                 }
-                                FocusBlock::Output => app.focus = FocusBlock::History,
+                                FocusBlock::Output => {
+                                    if !app.history.is_empty() {
+                                        app.focus = FocusBlock::History;
+                                        if app.history_index.is_none() && !app.history.is_empty() {
+                                            app.history_index = Some(0);
+                                            app.input = app.history[0].clone();
+                                        }
+                                    } else {
+                                         app.focus = FocusBlock::Input; // If no history, go back to input
+                                    }
+                                },
                                 FocusBlock::History => app.focus = FocusBlock::Input,
                             }
                         }
@@ -391,73 +349,96 @@ async fn run_app(
                             match app.focus {
                                 FocusBlock::Input => {
                                     let query = app.input.trim().to_string();
-                                    if !query.is_empty() { // Only add non-empty queries to history
-                                        app.history.insert(0, query.clone());
-                                        if app.history.len() > 16 {
-                                            app.history.pop();
-                                        }
-                                    }
-
-                                    app.input.clear();
-                                    app.clear_prev();
-                                    app.history_index=None;
-
                                     if !query.is_empty() {
+                                        app.history.insert(0, query.clone());
+                                        if app.history.len() > 16 { app.history.pop(); }
+                                        app.input.clear();
+                                        app.clear_prev();
+                                        app.history_index=None;
                                         spawn_path_search(query, sender.clone());
                                         app.is_loading = true;
-                                    } else {
-                                        // Execute action on the first result if input is empty on Enter
-                                        if let Some(selected_action) = app.output.get(app.selected_output_index) {
-                                            app.execute_action(selected_action).await?;
-                                            // Potentially set app.exit_flag = true if action implies exit
+                                    } else { // Input is empty
+                                        if !app.output.is_empty() && app.output.get(app.selected_output_index).is_some() {
+                                            // If input empty but output has items, effectively "Enter" on selected output.
+                                            // This mimics activating the current selection if any.
+                                            app.focus = FocusBlock::Output; // Shift focus to trigger output logic below
+                                            // The logic for FocusBlock::Output will handle the execution
                                         }
                                     }
                                 }
+
                                 FocusBlock::Output => {
                                     if let Some(selected_action) = app.output.get(app.selected_output_index) {
                                         LOG_TO_FILE(format!("[ACTION EXEC] Executing selected output: {:?}", selected_action.description));
-                                        match app.execute_action(selected_action).await {
+                                        // Clone the action before the await, as app state might change
+                                        let action_to_execute = selected_action.clone();
+                                        match app.execute_action(&action_to_execute).await {
                                             Ok(_) => {
                                                 LOG_TO_FILE("[ACTION EXEC] execute_action successful.".to_string());
-                                                // DECIDE WHAT HAPPENS NEXT:
-                                                // Option 1: Exit the application
-                                                // app.exit_flag = true;
-                                
-                                                // Option 2: Clear results and return to input
-                                                app.output.clear();
-                                                app.err_msg.clear(); // Clear any previous error
-                                                app.selected_output_index = 0;
-                                                app.focus = FocusBlock::Input;
-                                                LOG_TO_FILE("[ACTION EXEC] Cleared output, focus set to Input.".to_string());
-                                
-                                                // Option 3: Do nothing and stay (current behavior, likely problematic)
+                                                // For 'cd' like actions, it's common for the TUI to exit.
+                                                // Or, it could clear results and return to input for further commands.
+                                                // Let's choose exit for 'cd' actions for now for simplicity.
+                                                // If you want it to stay open, comment out app.exit_flag = true;
+                                                // and ensure state is reset (e.g., clear output, focus input).
+                                                if action_to_execute.action == "cd" {
+                                                    app.exit_flag = true;
+                                                } else {
+                                                    // For other actions, maybe clear and refocus
+                                                    app.output.clear();
+                                                    app.err_msg.clear();
+                                                    app.selected_output_index = 0;
+                                                    app.focus = FocusBlock::Input;
+                                                }
                                             }
                                             Err(e) => {
                                                 LOG_TO_FILE(format!("[ACTION EXEC] execute_action failed: {:?}", e));
                                                 app.err_msg = format!("Action failed: {:?}", e);
-                                                // Keep focus on output to show error, or switch to input
-                                                app.focus = FocusBlock::Input; // Or maybe keep Focus::Output to see error
+                                                app.focus = FocusBlock::Input; 
                                             }
                                         }
                                     } else {
                                         LOG_TO_FILE("[ACTION EXEC] Enter in Output focus, but no item selected or output empty.".to_string());
+                                        app.focus = FocusBlock::Input; // Go back to input if nothing to act on
                                     }
                                 }
+
                                 
                                 FocusBlock::History => {
                                     if let Some(index) = app.history_index {
-                                        app.input = app.history[index].clone();
-                                        app.history_index = None;
+                                        if index < app.history.len() { // Check bounds
+                                            app.input = app.history[index].clone();
+                                            // After selecting from history, clear history_index and move focus to input
+                                            // and potentially trigger a search with this input.
+                                            let query = app.input.trim().to_string();
+                                            app.history_index = None;
+                                            app.focus = FocusBlock::Input;
+
+                                            if !query.is_empty() {
+                                                // Optionally, immediately trigger search from history selection
+                                                // app.history.insert(0, query.clone()); // Don't re-add to history here
+                                                // if app.history.len() > 16 { app.history.pop(); }
+                                                // app.input.clear(); // Input is already set
+                                                app.clear_prev();
+                                                spawn_path_search(query, sender.clone());
+                                                app.is_loading = true;
+                                            }
+                                        }
+                                    } else {
+                                        // If history_index is None but focus is History (e.g. after Tab),
+                                        // Enter could mean "confirm current input" or "do nothing"
+                                        // For now, let's switch focus to input.
+                                        app.focus = FocusBlock::Input;
                                     }
                                 }
+
                             }
                         }
                         KeyCode::Up => {
                             match app.focus {
                                 FocusBlock::Input => {
                                     if !app.history.is_empty() {
-                                        let current_idx = app.history_index.unwrap_or(0); // Start from 0 if None
-                                        if app.history_index.is_none() { // First Up press
+                                        let current_idx = app.history_index.unwrap_or(0); 
+                                        if app.history_index.is_none() { 
                                             app.history_index = Some(0);
                                             app.input = app.history[0].clone();
                                         } else if current_idx < app.history.len() - 1 {
@@ -472,20 +453,20 @@ async fn run_app(
                                         app.selected_output_index -= 1;
                                     }
                                 }
-                                FocusBlock::History => {
-                                    if let Some(index) = app.history_index {
-                                        if index < app.history.len() - 1 {
-                                            app.history_index = Some(index + 1);
-                                            app.input = app.history[index + 1].clone();
-                                        }
-                                    } else {
-                                        app.history_index = Some(0);
-                                        app.input = app.history[0].clone();
+                                FocusBlock::History => { // Navigating history items when focus is on History block
+                                    if !app.history.is_empty() {
+                                       let new_idx = match app.history_index {
+                                            Some(idx) if idx < app.history.len() -1 => idx + 1,
+                                            Some(idx) => idx, // Stay at the end
+                                            None => 0, // Start from beginning
+                                       };
+                                       app.history_index = Some(new_idx);
+                                       app.input = app.history[new_idx].clone(); // Update input preview
                                     }
                                 }
                             }
-
                         }
+
                         KeyCode::Down => {
                             match app.focus {
                                 FocusBlock::Input => {
@@ -494,31 +475,29 @@ async fn run_app(
                                             let prev_idx = current_idx - 1;
                                             app.history_index = Some(prev_idx);
                                             app.input = app.history[prev_idx].clone();
-                                        } else { // Was at history[0], go to empty input
+                                        } else { 
                                             app.history_index = None;
                                             app.input.clear();
                                         }
                                     }
-                                    // If history_index is None, Down does nothing (already at empty input)
                                 }
                                 FocusBlock::Output => {
                                     if !app.output.is_empty() && app.selected_output_index < app.output.len() - 1 {
                                         app.selected_output_index += 1;
                                     }
                                 }
-                                FocusBlock::History => {
-                                    if let Some(index) = app.history_index {
-                                        if index > 0 {
-                                            app.history_index = Some(index - 1);
-                                            app.input = app.history[index - 1].clone();
-                                        } else {
-                                            app.history_index = None;
+                                FocusBlock::History => { // Navigating history items
+                                    if let Some(current_idx) = app.history_index {
+                                        if current_idx > 0 {
+                                            let prev_idx = current_idx - 1;
+                                            app.history_index = Some(prev_idx);
+                                            app.input = app.history[prev_idx].clone(); // Update input preview
+                                        } else { // At the top of history, further Down could clear input or cycle
+                                            app.history_index = None; // Go to "new input" state
                                             app.input.clear();
                                         }
-                                    } else if !app.history.is_empty() {
-                                        app.history_index = Some(app.history.len() - 1);
-                                        app.input = app.history[app.history.len() - 1].clone();
                                     }
+                                    // If history_index is None, Down does nothing (already at "new input")
                                 }
                             }
                         }
@@ -551,6 +530,7 @@ async fn run_app(
                         app.focus = FocusBlock::Input; // Keep focus on input
                     }
                     _ => {
+                        app.clear_prev();
                         app.err_msg = "Error receiving results from spawner".to_string();
                         app.focus = FocusBlock::Input; // Keep focus on input
                     }
@@ -564,7 +544,7 @@ async fn run_app(
                 // The sender has been dropped. This might mean all tasks are complete,
                 // or something went wrong.
                 app.is_loading = false; // No longer expecting messages from this channel
-                app.err_msg = "Async communication channel disconnected.".to_string();
+                // app.err_msg = "Async communication channel disconnected.".to_string();
                 // You might want to re-create the channel if you expect more tasks
                 // or handle this as a critical error. For now, just stop loading.
                 app.focus = FocusBlock::Input;
@@ -578,51 +558,47 @@ fn ui(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Input area
-            Constraint::Length(4), // Output area
-            Constraint::Min(0),    // History area
+            Constraint::Min(1),    // Output area (ensure at least 1 line)
+            Constraint::Length(5), // History area (fixed height for demo)
         ])
         .split(frame.area());
 
     // Input Block styling based on focus
     let input_title_style = Style::default().fg(Color::Yellow);
-    let input_border_style = if matches!(app.focus, FocusBlock::Input) {
+    let input_border_style = if matches!(app.focus, FocusBlock::Input) || matches!(app.focus, FocusBlock::History){
         Style::default().fg(Color::Green)
     } else {
         Style::default()
     };
-
-    let input_text = format!("> {}", app.input);
-    let input_paragraph = Paragraph::new(input_text)
+    let input_paragraph = Paragraph::new(format!("> {}", app.input))
         .style(input_title_style)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Search")
+                .title("Search (Input)")
                 .border_style(input_border_style),
         );
     frame.render_widget(input_paragraph, main_layout[0]);
 
     // Output Block styling and list creation
-    let output_title_style = Style::default().fg(Color::Cyan);
     let output_border_style = if matches!(app.focus, FocusBlock::Output) {
         Style::default().fg(Color::Green)
     } else {
         Style::default()
     };
-
     let output_block_base = Block::default()
         .borders(Borders::ALL)
-        .title("Output")
+        .title("Results (Output)")
         .border_style(output_border_style);
 
     if app.is_loading {
         frame.render_widget(
-            Paragraph::new("Loading...").style(output_title_style).block(output_block_base),
+            Paragraph::new("Loading...").style(Style::default().fg(Color::Cyan)).block(output_block_base),
             main_layout[1],
         );
     } else if !app.err_msg.is_empty() {
         frame.render_widget(
-            Paragraph::new(format!("Error: {}", app.err_msg))
+            Paragraph::new(app.err_msg.as_str()) // Removed "Error: " prefix as it's in the message
                 .style(Style::default().fg(Color::Red))
                 .block(output_block_base),
             main_layout[1],
@@ -633,33 +609,40 @@ fn ui(frame: &mut Frame, app: &App) {
             .iter()
             .enumerate()
             .map(|(i, res)| {
-                let item_text = format!("[{}] {} {}", res.spawner, res.action, res.description);
+                let item_text = format!("[{}] {} :: {}", res.spawner, res.action, res.description);
                 if matches!(app.focus, FocusBlock::Output) && i == app.selected_output_index {
                     ListItem::new(item_text).style(Style::default().fg(Color::Black).bg(Color::Cyan))
                 } else {
-                    ListItem::new(item_text).style(output_title_style)
+                    ListItem::new(item_text).style(Style::default().fg(Color::Cyan))
                 }
             })
             .collect();
         frame.render_widget(
-            List::new(items).block(output_block_base).highlight_style(
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan),
-            ),
+            List::new(items).block(output_block_base), //.highlight_style already handled by item style
             main_layout[1],
         );
     } else {
         frame.render_widget(
-            Paragraph::new("No results").style(output_title_style).block(output_block_base),
+            Paragraph::new("No results. Type a query and press Enter.").style(Style::default().fg(Color::DarkGray)).block(output_block_base),
             main_layout[1],
         );
     }
 
     // History Block
-    let history_text = app.history.iter().take(10).cloned().collect::<Vec<String>>().join("\n");
-    let history_block = Paragraph::new(history_text)
-        .block(Block::default().borders(Borders::ALL).title("History"))
-        .style(Style::default().fg(Color::White));
-    frame.render_widget(history_block, main_layout[2]);
+    let history_border_style = if matches!(app.focus, FocusBlock::History) {
+        Style::default().fg(Color::Green) // Highlight border when history is focused for navigation
+    } else {
+        Style::default()
+    };
+    let history_items: Vec<ListItem> = app.history.iter().enumerate().map(|(idx, entry)|{
+        if matches!(app.focus, FocusBlock::History) && app.history_index == Some(idx) {
+            ListItem::new(entry.as_str()).style(Style::default().fg(Color::Black).bg(Color::Magenta))
+        } else {
+            ListItem::new(entry.as_str()).style(Style::default().fg(Color::Gray))
+        }
+    }).collect();
+
+    let history_list = List::new(history_items)
+        .block(Block::default().borders(Borders::ALL).title("History").border_style(history_border_style));
+    frame.render_widget(history_list, main_layout[2]);
 }

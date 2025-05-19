@@ -22,6 +22,8 @@ use app::{App, FocusBlock};
 use utils::LOG_TO_FILE;
 use spawners::path_search::spawn_path_search;
 
+#[cfg(test)]
+mod tests;
 
 #[tokio::main]
 async fn main() -> AnyhowResult<()> {

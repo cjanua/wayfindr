@@ -1,3 +1,4 @@
 cargo build --release
 
-cp target/release/wayfindr ~/cmds/
+mv target/release/wayfindr ~/cmds/wayfindr-bin
+cp launch/wayfindr ~/cmds/wayfindr

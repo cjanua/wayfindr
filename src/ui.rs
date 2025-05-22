@@ -2,7 +2,7 @@
 
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
 use crate::app::{App, FocusBlock}; // Adjusted path
 
@@ -19,7 +19,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
 
     // Input Block styling based on focus
     let input_title_style = Style::default().fg(Color::Yellow);
-    let input_border_style = if matches!(app.focus, FocusBlock::Input) || matches!(app.focus, FocusBlock::History){
+    let input_border_style = if matches!(app.focus, FocusBlock::Input) { // || matches!(app.focus, FocusBlock::History)
         Style::default().fg(Color::Green)
     } else {
         Style::default()
@@ -71,9 +71,23 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 }
             })
             .collect();
-        frame.render_widget(
-            List::new(items).block(output_block_base),
+            
+        // Create a stateful list that can scroll
+        let list = List::new(items)
+            .block(output_block_base)
+            .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan));
+        
+        // Create list state for scrolling
+        let mut list_state = ListState::default();
+        if matches!(app.focus, FocusBlock::Output) {
+            list_state.select(Some(app.selected_output_index));
+        }
+        
+        // Render the stateful list
+        frame.render_stateful_widget(
+            list,
             main_layout[1],
+            &mut list_state
         );
     } else {
         frame.render_widget(

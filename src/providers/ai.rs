@@ -30,6 +30,8 @@ impl SearchProvider for AiProvider {
     }
 
     fn can_handle(&self, query: &str) -> bool {
+        // Only handle AI queries that are explicitly prefixed
+        // This prevents accidental AI calls during live search
         self.enabled && (query.starts_with("ai:") || query.starts_with("ask:"))
     }
 
@@ -42,14 +44,17 @@ impl SearchProvider for AiProvider {
             return Ok(Vec::new());
         }
 
+        // Extract the actual AI query
         let ai_query = if query.starts_with("ai:") {
             query.strip_prefix("ai:").unwrap_or("").trim()
         } else if query.starts_with("ask:") {
             query.strip_prefix("ask:").unwrap_or("").trim()
         } else {
-            query
+            // This should not happen due to can_handle check, but be safe
+            return Ok(Vec::new());
         };
 
+        // Require non-empty query after prefix
         if ai_query.is_empty() {
             return Ok(Vec::new());
         }

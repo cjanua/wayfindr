@@ -67,33 +67,67 @@ impl App {
         Ok(app)
     }
     
+    // Update the load_initial_results method to show actual top used apps
     async fn load_initial_results(&mut self) {
         let top_used = usage::get_top_used(5);
         if !top_used.is_empty() {
-            // Convert usage IDs back to results if possible
-            // This is simplified - in practice you'd want to reconstruct the ActionResults
-            self.results = top_used.into_iter()
-                .take(5)
-                .enumerate()
-                .map(|(i, id)| ActionResult::new_launch(
-                    id.clone(),
-                    "usage",
-                    format!("Frequently Used #{}", i + 1),
-                    id,
-                    false,
-                ))
-                .collect();
+            // Get the actual app names and try to find them in the applications provider
+            let mut initial_results = Vec::new();
+            
+            for app_id in top_used {
+                // Try to reconstruct ActionResult from usage data
+                // This is a simplified approach - you might want to cache app data
+                if let Some(result) = self.get_app_by_id(&app_id).await {
+                    initial_results.push(result);
+                }
+            }
+            
+            self.results = initial_results;
+            self.selected_index = 0;
+        } else {
+            // If no usage data, show some default apps or empty
+            self.results = Vec::new();
         }
     }
     
+    // Add helper method to check if query is AI-related
+    fn is_ai_query(&self, query: &str) -> bool {
+        let config = get_config();
+        query.starts_with(&config.search.ai_prefix) || query.starts_with("ask:")
+    }
+
+    // Helper method to get app by ID (simplified - you might want to improve this)
+    async fn get_app_by_id(&self, app_id: &str) -> Option<ActionResult> {
+        // This is a simplified implementation
+        // You might want to cache application data or query the provider directly
+        
+        // Extract app name from ID (assuming format like "app_<hash>")
+        if app_id.starts_with("app_") {
+            // For now, create a simple launch action
+            // In a real implementation, you'd want to store more app metadata
+            let app_name = app_id.strip_prefix("app_").unwrap_or(app_id);
+            
+            Some(ActionResult::new_launch(
+                app_id.to_string(),
+                "applications",
+                format!("App: {}", app_name),
+                app_name.to_string(),
+                false,
+            ))
+        } else {
+            None
+        }
+    }
+
+    // Update the run method to load initial results right after starting
     pub async fn run(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
         search_tx: mpsc::Sender<SearchMessage>,
         mut search_rx: mpsc::Receiver<SearchMessage>,
     ) -> AppResult<()> {
-        // Start with initial search for empty query
-        self.perform_search("", &search_tx).await;
+        // Load initial results (top used apps) instead of empty search
+        self.load_initial_results().await;
         
         loop {
             if self.should_exit {
@@ -163,9 +197,10 @@ impl App {
                     self.input.push(c);
                     self.history_index = None;
                     
-                    // Trigger live search if enabled
-                    if get_config().search.enable_live_search {
-                        self.perform_search(&self.input, search_tx).await;
+                    // Only trigger live search for NON-AI queries
+                    if get_config().search.enable_live_search && !self.is_ai_query(&self.input) {
+                        let input = self.input.clone();
+                        self.perform_search(&input, search_tx).await;
                     }
                 }
             }
@@ -175,9 +210,13 @@ impl App {
                     self.input.pop();
                     self.history_index = None;
                     
-                    // Trigger live search if enabled
-                    if get_config().search.enable_live_search {
-                        self.perform_search(&self.input, search_tx).await;
+                    // Only trigger live search for NON-AI queries
+                    if get_config().search.enable_live_search && !self.is_ai_query(&self.input) {
+                        let input = self.input.clone();
+                        self.perform_search(&input, search_tx).await;
+                    } else if self.input.is_empty() {
+                        // Show top apps when input becomes empty
+                        self.load_initial_results().await;
                     }
                 }
             }
@@ -187,6 +226,7 @@ impl App {
         
         Ok(())
     }
+    
     
     async fn handle_input_enter(
         &mut self,

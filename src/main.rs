@@ -61,7 +61,7 @@ async fn run_application() -> Result<()> {
     // Cleanup
     terminal::restore_terminal().context("Failed to restore terminal")?;
     
-    result
+    result.map_err(|e| anyhow::anyhow!("Application error: {}", e))
 }
 
 #[cfg(test)]

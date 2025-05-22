@@ -155,7 +155,7 @@ impl SearchProvider for ApplicationProvider {
         query.is_empty() || 
         query.starts_with("app:") ||
         query.starts_with("apps") ||
-        !query.starts_with("ai:") // Handle general queries unless they're AI queries
+        (!query.starts_with("ai:") && !query.starts_with("ask:")) // Handle general queries unless they're AI queries
     }
 
     fn priority(&self) -> u8 {
@@ -179,15 +179,19 @@ impl SearchProvider for ApplicationProvider {
 
         for app in &provider.apps {
             let score = if processed_query.is_empty() {
-                // Empty query - show top used apps only
+                // Empty query - show ONLY top used apps (minimum 1 use)
                 let usage_count = usage::get_usage_boost(&utils::generate_id("app", &app.name));
                 if usage_count > 0 {
+                    // Use actual usage count as base score for ranking
+                    let actual_usage = usage::get_usage_count(&utils::generate_id("app", &app.name));
+                    utils::log_info(&format!("Empty query - {} has {} uses, boost: {}", 
+                        app.name, actual_usage, usage_count));
                     usage_count
                 } else {
                     continue; // Skip unused apps for empty query
                 }
             } else {
-                // Calculate relevance score
+                // Calculate relevance score for non-empty queries
                 let base_score = utils::calculate_relevance_score(
                     processed_query,
                     &app.name,
@@ -226,8 +230,14 @@ impl SearchProvider for ApplicationProvider {
         // Sort by score and limit results
         matches.sort_by(|a, b| b.score.cmp(&a.score));
         
-        let limit = if processed_query.is_empty() { 5 } else { 20 };
-        matches.truncate(limit);
+        if processed_query.is_empty() {
+            // For empty query, strictly limit to top 5 most used
+            matches.truncate(5);
+            utils::log_info(&format!("Empty query - showing top {} most-used apps", matches.len()));
+        } else {
+            // Normal limit for search queries
+            matches.truncate(20);
+        }
 
         Ok(matches)
     }

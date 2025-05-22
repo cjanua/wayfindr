@@ -4,6 +4,8 @@ use std::io::Write;
 use chrono::Local;
 use crate::config::{get_config, LogLevel};
 
+pub const DEFAULT_LOG_FILE_PATH: &str = "~/.wayfindr/wayfindr.log";
+
 pub fn log_debug(message: &str) {
     log_with_level(LogLevel::Debug, message);
 }

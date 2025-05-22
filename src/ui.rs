@@ -1,116 +1,203 @@
 // src/ui.rs
-
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Clear},
 };
-use crate::app::{App, FocusBlock}; // Adjusted path
+use crate::app::{App, FocusState};
 
-// ui function remains largely the same, just ensure paths to App and FocusBlock are correct
-pub fn ui(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &App) {
     let main_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Input area
-            Constraint::Min(1),    // Output area (ensure at least 1 line)
-            Constraint::Length(5), // History area (fixed height for demo)
+            Constraint::Min(1),    // Results area
+            Constraint::Length(1), // Status bar
         ])
         .split(frame.area());
 
-    // Input Block styling based on focus
-    let input_title_style = Style::default().fg(Color::Yellow);
-    let input_border_style = if matches!(app.focus, FocusBlock::Input) { // || matches!(app.focus, FocusBlock::History)
+    render_input(frame, app, main_layout[0]);
+    render_results(frame, app, main_layout[1]);
+    render_status_bar(frame, app, main_layout[2]);
+    
+    // Render error popup if there's an error
+    if let Some(ref error) = app.error_message {
+        render_error_popup(frame, error);
+    }
+}
+
+fn render_input(frame: &mut Frame, app: &App, area: Rect) {
+    let input_style = Style::default().fg(Color::Yellow);
+    let border_style = if app.focus == FocusState::Input {
         Style::default().fg(Color::Green)
     } else {
-        Style::default()
+        Style::default().fg(Color::Gray)
     };
-    let input_paragraph = Paragraph::new(format!("> {}", app.input))
-        .style(input_title_style)
+
+    let input_text = if app.input.is_empty() && app.focus == FocusState::Input {
+        "Type to search apps, directories, or 'ai: <question>' for AI..."
+    } else {
+        &app.input
+    };
+
+    let input_paragraph = Paragraph::new(format!("> {}", input_text))
+        .style(input_style)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Search (Input)")
-                .border_style(input_border_style),
+                .title("Search")
+                .border_style(border_style),
         );
-    frame.render_widget(input_paragraph, main_layout[0]);
 
-    // Output Block styling and list creation
-    let output_border_style = if matches!(app.focus, FocusBlock::Output) {
+    frame.render_widget(input_paragraph, area);
+}
+
+fn render_results(frame: &mut Frame, app: &App, area: Rect) {
+    let border_style = if app.focus == FocusState::Results {
         Style::default().fg(Color::Green)
     } else {
-        Style::default()
+        Style::default().fg(Color::Gray)
     };
-    let output_block_base = Block::default()
+
+    let results_block = Block::default()
         .borders(Borders::ALL)
-        .title("Results (Output)")
-        .border_style(output_border_style);
+        .title(format!("Results ({})", app.results.len()))
+        .border_style(border_style);
 
     if app.is_loading {
-        frame.render_widget(
-            Paragraph::new("Loading...").style(Style::default().fg(Color::Cyan)).block(output_block_base),
-            main_layout[1],
-        );
-    } else if !app.err_msg.is_empty() {
-        frame.render_widget(
-            Paragraph::new(app.err_msg.as_str())
-                .style(Style::default().fg(Color::Red))
-                .block(output_block_base),
-            main_layout[1],
-        );
-    } else if !app.output.is_empty() {
-        let items: Vec<ListItem> = app
-            .output
-            .iter()
-            .enumerate()
-            .map(|(i, res)| {
-                let item_text = format!("[{}] {} :: {}", res.spawner, res.action, res.description);
-                if matches!(app.focus, FocusBlock::Output) && i == app.selected_output_index {
-                    ListItem::new(item_text).style(Style::default().fg(Color::Black).bg(Color::Cyan))
-                } else {
-                    ListItem::new(item_text).style(Style::default().fg(Color::Cyan))
-                }
-            })
-            .collect();
-            
-        // Create a stateful list that can scroll
-        let list = List::new(items)
-            .block(output_block_base)
-            .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan));
-        
-        // Create list state for scrolling
-        let mut list_state = ListState::default();
-        if matches!(app.focus, FocusBlock::Output) {
-            list_state.select(Some(app.selected_output_index));
-        }
-        
-        // Render the stateful list
-        frame.render_stateful_widget(
-            list,
-            main_layout[1],
-            &mut list_state
-        );
+        let loading_paragraph = Paragraph::new("🔍 Searching...")
+            .style(Style::default().fg(Color::Cyan))
+            .block(results_block);
+        frame.render_widget(loading_paragraph, area);
+    } else if app.results.is_empty() {
+        let empty_paragraph = Paragraph::new("No results found. Try a different search term.")
+            .style(Style::default().fg(Color::DarkGray))
+            .block(results_block);
+        frame.render_widget(empty_paragraph, area);
     } else {
-        frame.render_widget(
-            Paragraph::new("No results. Type a query and press Enter.").style(Style::default().fg(Color::DarkGray)).block(output_block_base),
-            main_layout[1],
-        );
+        render_results_list(frame, app, area, results_block);
+    }
+}
+
+fn render_results_list(frame: &mut Frame, app: &App, area: Rect, block: Block) {
+    let items: Vec<ListItem> = app
+        .results
+        .iter()
+        .enumerate()
+        .map(|(i, result)| {
+            let icon = get_result_icon(result);
+            let provider_tag = format!("[{}]", result.provider);
+            
+            let item_text = if result.description.is_empty() {
+                format!("{} {} {}", icon, provider_tag, result.title)
+            } else {
+                format!("{} {} {} - {}", icon, provider_tag, result.title, 
+                       truncate_description(&result.description, 60))
+            };
+
+            let style = if app.focus == FocusState::Results && i == app.selected_index {
+                Style::default().fg(Color::Black).bg(Color::Cyan)
+            } else {
+                Style::default().fg(Color::White)
+            };
+
+            ListItem::new(item_text).style(style)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan));
+
+    let mut list_state = ListState::default();
+    if app.focus == FocusState::Results && !app.results.is_empty() {
+        list_state.select(Some(app.selected_index));
     }
 
-    // History Block
-    let history_border_style = if matches!(app.focus, FocusBlock::History) {
-        Style::default().fg(Color::Green)
-    } else {
-        Style::default()
-    };
-    let history_items: Vec<ListItem> = app.history.iter().enumerate().map(|(idx, entry)|{
-        if matches!(app.focus, FocusBlock::History) && app.history_index == Some(idx) {
-            ListItem::new(entry.as_str()).style(Style::default().fg(Color::Black).bg(Color::Magenta))
-        } else {
-            ListItem::new(entry.as_str()).style(Style::default().fg(Color::Gray))
-        }
-    }).collect();
+    frame.render_stateful_widget(list, area, &mut list_state);
+}
 
-    let history_list = List::new(history_items)
-        .block(Block::default().borders(Borders::ALL).title("History").border_style(history_border_style));
-    frame.render_widget(history_list, main_layout[2]);
+fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let mut status_parts = Vec::new();
+    
+    // Focus indicator
+    let focus_text = match app.focus {
+        FocusState::Input => "INPUT",
+        FocusState::Results => "RESULTS",
+    };
+    status_parts.push(format!("Focus: {}", focus_text));
+    
+    // History indicator
+    if !app.history.is_empty() {
+        status_parts.push(format!("History: {}", app.history.len()));
+    }
+    
+    // Controls
+    status_parts.push("ESC:Exit".to_string());
+    status_parts.push("TAB:Switch".to_string());
+    status_parts.push("↑↓:Navigate".to_string());
+    status_parts.push("Enter:Select".to_string());
+
+    let status_text = status_parts.join(" | ");
+    let status_paragraph = Paragraph::new(status_text)
+        .style(Style::default().fg(Color::DarkGray));
+
+    frame.render_widget(status_paragraph, area);
+}
+
+fn render_error_popup(frame: &mut Frame, error_message: &str) {
+    let popup_area = centered_rect(60, 20, frame.area());
+    
+    // Clear the background
+    frame.render_widget(Clear, popup_area);
+    
+    let error_paragraph = Paragraph::new(error_message)
+        .style(Style::default().fg(Color::Red))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Error")
+                .border_style(Style::default().fg(Color::Red)),
+        );
+    
+    frame.render_widget(error_paragraph, popup_area);
+}
+
+fn get_result_icon(result: &crate::types::ActionResult) -> &'static str {
+    use crate::types::ActionType;
+    
+    match &result.action {
+        ActionType::Launch { needs_terminal: true } => "⚡",
+        ActionType::Launch { needs_terminal: false } => "🚀",
+        ActionType::Navigate { .. } => "📁",
+        ActionType::AiResponse => "🤖",
+        ActionType::Custom { .. } => "⚙️",
+    }
+}
+
+fn truncate_description(description: &str, max_length: usize) -> String {
+    if description.len() <= max_length {
+        description.to_string()
+    } else {
+        format!("{}...", &description[..max_length.saturating_sub(3)])
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }

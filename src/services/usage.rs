@@ -156,6 +156,15 @@ impl UsageService {
         entries.truncate(limit);
         entries
     }
+
+    pub fn get_top_used_with_counts(&self, limit: usize) -> Vec<(String, u32)> {
+        let mut entries: Vec<_> = self.entries.iter()
+            .map(|(id, entry)| (id.clone(), entry.count))
+            .collect();
+        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries.truncate(limit);
+        entries
+    }
     
     pub fn cleanup_old_entries(&mut self, days: i64) {
         let cutoff = Utc::now() - chrono::Duration::days(days);
@@ -232,5 +241,19 @@ pub fn get_top_used(limit: usize) -> Vec<String> {
             .into_iter()
             .map(|(id, _)| id.clone())
             .collect())
+        .unwrap_or_default()
+}
+
+pub fn get_usage_count(action_id: &str) -> u32 {
+    USAGE_SERVICE.get()
+        .and_then(|service| service.lock().ok())
+        .map(|service| service.get_usage_count(action_id))
+        .unwrap_or(0)
+}
+
+pub fn get_top_used_with_counts(limit: usize) -> Vec<(String, u32)> {
+    USAGE_SERVICE.get()
+        .and_then(|service| service.lock().ok())
+        .map(|service| service.get_top_used_with_counts(limit))
         .unwrap_or_default()
 }

@@ -80,10 +80,9 @@ async fn search_applications(query: &str) -> Vec<ActionResult> {
             let mut score = 0;
             
             if query.is_empty() {
-                // Empty query: show some popular apps but not all
                 let usage_count = usage_stats.get_usage_count(&app.name);
                 if usage_count > 0 {
-                    score = 1; // Only show apps that have been used before
+                    score = usage_count as i32; // Use usage count as score
                 }
             } else {
                 // Exact name match gets highest score
@@ -136,7 +135,11 @@ async fn search_applications(query: &str) -> Vec<ActionResult> {
     });
     
     // Limit app results (save space for directories)
-    matches.truncate(20);
+    if query.is_empty() {
+        matches.truncate(5);
+    } else {
+        matches.truncate(20);
+    }
     
     matches
         .into_iter()

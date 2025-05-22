@@ -25,17 +25,19 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        Self {
+        let mut app = Self {
             input: String::new(),
             output: vec![],
             history: vec![],
             exit_flag: false,
             err_msg: String::new(),
-            is_loading: false,
+            is_loading: true,
             selected_output_index: 0,
             focus: FocusBlock::Input,
             history_index: None,
-        }
+        };
+
+        app
     }
 
     pub fn clear_prev(&mut self) {

@@ -75,6 +75,7 @@ async fn run_app_loop(
     app: &mut App,
 ) -> Result<(), AppError> {
     let (sender, mut receiver) = tokio_mpsc::channel::<AsyncResult>(1);
+    spawn_unified_search(String::new(), sender.clone()); // Empty query = top 5 apps
 
     loop {
         if app.exit_flag {
@@ -98,10 +99,60 @@ async fn run_app_loop(
                     match key.code {
                         KeyCode::Esc => app.exit_flag = true,
                         KeyCode::Char(c) => {
-                            if app.focus == FocusBlock::Input { app.input.push(c); }
+                            if app.focus == FocusBlock::Input { 
+                                app.input.push(c);
+                                
+                                // *** ADD THIS: Trigger search immediately ***
+                                app.clear_prev();
+                                app.is_loading = true;
+                                
+                                let query = app.input.trim().to_string();
+                                
+                                // Same logic as Enter but triggered on every keystroke
+                                if query.to_lowercase().starts_with("ai:") || query.to_lowercase().starts_with("ask:") {
+                                    let ai_prompt_content = query.split_at(query.find(':').unwrap_or(0) + 1).1.trim().to_string();
+                                    if !ai_prompt_content.is_empty() {
+                                        spawn_ai_query(ai_prompt_content, sender.clone());
+                                    } else {
+                                        app.err_msg = "AI query is empty.".to_string();
+                                        app.is_loading = false;
+                                    }
+                                } else if query.to_lowercase().starts_with("app:") {
+                                    let app_query = query.split_at(4).1.trim().to_string();
+                                    spawn_app_search(app_query, sender.clone());
+                                } else {
+                                    // Default: unified search
+                                    spawn_unified_search(query, sender.clone());
+                                }
+                            }                        
                         }
                         KeyCode::Backspace => {
-                            if app.focus == FocusBlock::Input { app.input.pop(); }
+                            if app.focus == FocusBlock::Input {
+                                app.input.pop();
+
+                                // *** ADD THIS: Trigger search immediately ***
+                                app.clear_prev();
+                                app.is_loading = true;
+                                
+                                let query = app.input.trim().to_string();
+                                
+                                // Same logic as Enter but triggered on every keystroke
+                                if query.to_lowercase().starts_with("ai:") || query.to_lowercase().starts_with("ask:") {
+                                    let ai_prompt_content = query.split_at(query.find(':').unwrap_or(0) + 1).1.trim().to_string();
+                                    if !ai_prompt_content.is_empty() {
+                                        spawn_ai_query(ai_prompt_content, sender.clone());
+                                    } else {
+                                        app.err_msg = "AI query is empty.".to_string();
+                                        app.is_loading = false;
+                                    }
+                                } else if query.to_lowercase().starts_with("app:") {
+                                    let app_query = query.split_at(4).1.trim().to_string();
+                                    spawn_app_search(app_query, sender.clone());
+                                } else {
+                                    // Default: unified search
+                                    spawn_unified_search(query, sender.clone());
+                                }
+                            }
                         }
                         KeyCode::Tab => { // Cycle focus: Input -> Output -> History -> Input
                             match app.focus {
@@ -157,12 +208,8 @@ async fn run_app_loop(
                                             LOG_TO_FILE(format!("[UNIFIED_TRIGGER] Spawning unified search for: '{}'", query));
                                             spawn_unified_search(query, sender.clone());
                                         }
-                                    } else if !app.output.is_empty() { // Input empty, try to activate selected output
-                                        app.focus = FocusBlock::Output; 
-                                        // The logic below for FocusBlock::Output will handle it in the next iteration if not immediate.
-                                        // To make it immediate, you could replicate the FocusBlock::Output logic here or refactor.
-                                        // For now, simply changing focus might be enough if user presses Enter again.
                                     }
+                                    app.focus = FocusBlock::Output; // Focus on the AI response
                                 }
                                 FocusBlock::Output => {
                                     if let Some(selected_action) = app.output.get(app.selected_output_index).cloned() { // Clone to avoid borrow issues
@@ -263,7 +310,7 @@ async fn run_app_loop(
                 match async_result {
                     AsyncResult::PathSearchResult(results) => {
                         app.output = results; app.err_msg.clear(); app.selected_output_index = 0;
-                        app.focus = if app.output.is_empty() { FocusBlock::Input } else { FocusBlock::Output };
+                        // app.focus = if app.output.is_empty() { FocusBlock::Input } else { FocusBlock::Output };
                     }
                     AsyncResult::AiResponse(response_text) => { // Handle AI Response
                         if response_text.contains("[INVALID]") {
@@ -278,7 +325,6 @@ async fn run_app_loop(
                                 data: "".to_string(), // No specific data for action execution
                             }];
                             app.selected_output_index = 0;
-                            app.focus = FocusBlock::Output; // Focus on the AI response
                         }
                     }
                     AsyncResult::Error(err_text) => {

@@ -8,14 +8,12 @@ use crate::utils::LOG_TO_FILE; // For logging within this module if needed
 pub fn launch_kitty_for_cd(path_to_cd: &str) -> Result<(), std::io::Error> {
     LOG_TO_FILE(format!("[PROCESS_EXEC] Attempting to open Kitty and cd to: {}", path_to_cd));
 
-    let escaped_path = path_to_cd.replace("'", r"'\''");
-    let shell_cmd = format!("cd '{}' && exec $SHELL", escaped_path);
-    LOG_TO_FILE(format!("[PROCESS_EXEC] Shell command for Kitty: {}", shell_cmd));
+    let shell_safe_path = format!("'{}'", path_to_cd.replace("'", r"'\''"));
     let command_for_hyprctl = format!(
-        "kitty -e sh -c \"{}\"", // Note: The outer quotes are for Rust's format! string.
-                                 // The \" becomes a literal " in command_for_hyprctl.
-        shell_cmd
+        "kitty -d {} $SHELL",
+        shell_safe_path
     );
+    LOG_TO_FILE(format!("[PROCESS_EXEC] hyprctl dispatch exec {}", command_for_hyprctl));
 
     let output = StdCommand::new("hyprctl")
         .args(&["dispatch", "exec", &command_for_hyprctl])

@@ -77,10 +77,14 @@ impl App {
             }
             "app" => {
                 if action_result.action == "launch" {
-                    let exec_command = &action_result.data;
-                    match process_execution::launch_application(exec_command) {
+                    // Parse the data to extract command and terminal flag
+                    let parts: Vec<&str> = action_result.data.split('|').collect();
+                    let exec_command = parts[0];
+                    let needs_terminal = parts.get(1).map(|s| *s == "true").unwrap_or(false);
+                    
+                    match process_execution::launch_application(exec_command, needs_terminal) {
                         Ok(_) => {
-                            LOG_TO_FILE(format!("[APP_ACTION] Application launched successfully: {}", exec_command));
+                            LOG_TO_FILE(format!("[APP_ACTION] Application launched successfully: {} (terminal: {})", exec_command, needs_terminal));
                             // Don't exit for app launches, just clear and return to input
                         }
                         Err(e) => {

@@ -1,4 +1,4 @@
-// src/spawners/app_provider.rs
+// src/spawners/app.rs
 use crate::types::{AsyncResult, ActionResult};
 use std::collections::HashMap;
 use std::fs;
@@ -211,7 +211,7 @@ pub fn spawn_app_search(query: String, tx: tokio_mpsc::Sender<AsyncResult>) {
                     app.name, 
                     app.comment.as_deref().unwrap_or("")
                 ),
-                data: app.clean_exec_command(),
+                data: format!("{}|{}", app.clean_exec_command(), app.terminal), // Pass both command and terminal flag
             })
             .collect();
         

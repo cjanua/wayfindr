@@ -20,8 +20,8 @@ pub fn launch_kitty_for_cd(path_to_cd: &str) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-pub fn launch_application(exec_command: &str) -> Result<(), std::io::Error> {
-    LOG_TO_FILE(format!("[PROCESS_EXEC] Launching application: {}", exec_command));
+pub fn launch_application(exec_command: &str, needs_terminal: bool) -> Result<(), std::io::Error> {
+    LOG_TO_FILE(format!("[PROCESS_EXEC] Launching application: {} (terminal: {})", exec_command, needs_terminal));
 
     // Parse the command and arguments
     let parts: Vec<&str> = exec_command.split_whitespace().collect();
@@ -32,14 +32,12 @@ pub fn launch_application(exec_command: &str) -> Result<(), std::io::Error> {
         ));
     }
 
-    let command = parts[0];
-    let args = &parts[1..];
-
-    // Use hyprctl to launch the application
-    let full_command = if args.is_empty() {
-        command.to_string()
+    let full_command = if needs_terminal {
+        // Launch in terminal (using kitty like your cd command)
+        format!("kitty -e {}", exec_command)
     } else {
-        format!("{} {}", command, args.join(" "))
+        // Launch directly
+        exec_command.to_string()
     };
 
     LOG_TO_FILE(format!("[PROCESS_EXEC] hyprctl dispatch exec {}", full_command));
@@ -48,6 +46,7 @@ pub fn launch_application(exec_command: &str) -> Result<(), std::io::Error> {
     LOG_TO_FILE(format!("[PROCESS_EXEC] App launch output: {}", output));
     Ok(())
 }
+
 
 
 pub fn hyprctl_dispatch_exec(command: &str) -> Result<String, std::io::Error> {

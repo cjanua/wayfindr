@@ -15,18 +15,25 @@ pub fn launch_kitty_for_cd(path_to_cd: &str) -> Result<(), std::io::Error> {
     );
     LOG_TO_FILE(format!("[PROCESS_EXEC] hyprctl dispatch exec {}", command_for_hyprctl));
 
+    let output = hyprctl_dispatch_exec(&command_for_hyprctl)?;
+    LOG_TO_FILE(format!("[PROCESS_EXEC] Output from command: {}", output));
+    Ok(())
+}
+
+pub fn hyprctl_dispatch_exec(command: &str) -> Result<String, std::io::Error> {
+    LOG_TO_FILE(format!("[PROCESS_EXEC] Executing command: {}", command));
     let output = StdCommand::new("hyprctl")
-        .args(&["dispatch", "exec", &command_for_hyprctl])
+        .args(&["dispatch", "exec", command])
         .output()?;
 
     if output.status.success() {
-        LOG_TO_FILE(format!("[PROCESS_EXEC] Kitty launched to cd to: {}", path_to_cd));
-        Ok(())
+        LOG_TO_FILE(format!("[PROCESS_EXEC] Command executed successfully: {}", command));
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         LOG_TO_FILE(format!(
-            "[PROCESS_EXEC] Error launching Kitty for cd {}: {}",
-            path_to_cd, stderr
+            "[PROCESS_EXEC] Error executing command {}: {}",
+            command, stderr
         ));
         Err(std::io::Error::new(std::io::ErrorKind::Other, "TerminalError"))
     }

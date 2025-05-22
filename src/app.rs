@@ -25,7 +25,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        let mut app = Self {
+        let app = Self {
             input: String::new(),
             output: vec![],
             history: vec![],

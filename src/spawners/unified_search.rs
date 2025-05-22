@@ -13,49 +13,35 @@ pub fn spawn_unified_search(query: String, tx: tokio_mpsc::Sender<AsyncResult>) 
     tokio::spawn(async move {
         LOG_TO_FILE(format!("[SPAWNER_UNIFIED] Unified search for: '{}'", query));
         
-        let mut all_results: Vec<ActionResult> = Vec::new();
-        let errors: Vec<String> = Vec::new();
+        let mut all_results: Vec<(ActionResult, i32)> = Vec::new(); // Keep scores!
+        let _errors: Vec<String> = Vec::new();
 
         // 1. Search applications first (higher priority)
         let app_results = search_applications(&query).await;
         all_results.extend(app_results);
 
-        // 2. Search directories (lower priority)
+        // 2. Search directories (lower priority) 
         let dir_results = search_directories(&query).await;
         all_results.extend(dir_results);
 
-        // 3. Sort results: Apps first (by usage + relevance), then directories (by relevance)
+        // 3. Sort by score (highest first), apps will naturally rank higher due to usage boosts
         all_results.sort_by(|a, b| {
-            // First, separate by type (app vs directory)
-            let a_is_app = a.spawner == "app";
-            let b_is_app = b.spawner == "app";
-            
-            match (a_is_app, b_is_app) {
-                (true, false) => std::cmp::Ordering::Less,   // Apps come first
-                (false, true) => std::cmp::Ordering::Greater, // Directories come second
-                _ => {
-                    // Same type, sort by description (which contains relevance info)
-                    a.description.cmp(&b.description)
-                }
-            }
+            b.1.cmp(&a.1) // Sort by score descending
         });
 
+        // 4. Extract just the ActionResults (drop scores)
+        let final_results: Vec<ActionResult> = all_results.into_iter().map(|(action, _score)| action).collect();
+
         // Limit total results to prevent overwhelming UI
-        all_results.truncate(50);
-
-        LOG_TO_FILE(format!("[SPAWNER_UNIFIED] Found {} total results ({} apps, {} directories)", 
-            all_results.len(),
-            all_results.iter().filter(|r| r.spawner == "app").count(),
-            all_results.iter().filter(|r| r.spawner != "app").count()
-        ));
-
-        let result_to_send = if !all_results.is_empty() {
-            AsyncResult::PathSearchResult(all_results)
-        } else if !errors.is_empty() {
-            AsyncResult::Error(errors.join("; "))
+        let final_results = if final_results.len() > 50 {
+            final_results[..50].to_vec()
         } else {
-            AsyncResult::PathSearchResult(Vec::new())
+            final_results
         };
+
+        LOG_TO_FILE(format!("[SPAWNER_UNIFIED] Found {} total results", final_results.len()));
+
+        let result_to_send = AsyncResult::PathSearchResult(final_results);
 
         if tx.send(result_to_send).await.is_err() {
             LOG_TO_FILE("[SPAWNER_UNIFIED] Failed to send unified results to main thread".to_string());
@@ -63,7 +49,7 @@ pub fn spawn_unified_search(query: String, tx: tokio_mpsc::Sender<AsyncResult>) 
     });
 }
 
-async fn search_applications(query: &str) -> Vec<ActionResult> {
+async fn search_applications(query: &str) -> Vec<(ActionResult, i32)> {
     LOG_TO_FILE(format!("[SPAWNER_UNIFIED] Searching applications for: '{}'", query));
     
     let apps = scan_desktop_files();
@@ -80,9 +66,11 @@ async fn search_applications(query: &str) -> Vec<ActionResult> {
             let mut score = 0;
             
             if query.is_empty() {
+                // Empty query: show top 5 most-used apps only
                 let usage_count = usage_stats.get_usage_count(&app.name);
                 if usage_count > 0 {
-                    score = usage_count as i32; // Use usage count as score
+                    score = usage_count as i32; // Use actual usage count as score for empty query
+                    LOG_TO_FILE(format!("[SPAWNER_UNIFIED] Empty query - {} has {} uses", app.name, usage_count));
                 }
             } else {
                 // Exact name match gets highest score
@@ -118,9 +106,11 @@ async fn search_applications(query: &str) -> Vec<ActionResult> {
             }
             
             if score > 0 {
-                // Add usage boost to the score
-                let usage_boost = usage_stats.get_usage_boost(&app.name);
-                score += usage_boost;
+                if !query.is_empty() {
+                    // Add usage boost to the score for non-empty queries
+                    let usage_boost = usage_stats.get_usage_boost(&app.name);
+                    score += usage_boost;
+                }
                 
                 Some((app, score))
             } else {
@@ -134,16 +124,18 @@ async fn search_applications(query: &str) -> Vec<ActionResult> {
         b.1.cmp(&a.1).then_with(|| a.0.name.cmp(&b.0.name))
     });
     
-    // Limit app results (save space for directories)
+    // Special limit for empty query (top 5 used apps)
     if query.is_empty() {
         matches.truncate(5);
+        LOG_TO_FILE(format!("[SPAWNER_UNIFIED] Empty query - showing top {} most-used apps", matches.len()));
     } else {
+        // Normal limit for search queries
         matches.truncate(20);
     }
     
     matches
         .into_iter()
-        .map(|(app, _score)| ActionResult {
+        .map(|(app, score)| (ActionResult {
             spawner: "app".to_string(),
             action: "launch".to_string(),
             description: format!("{} - {}", 
@@ -151,12 +143,18 @@ async fn search_applications(query: &str) -> Vec<ActionResult> {
                 app.comment.as_deref().unwrap_or("")
             ),
             data: format!("{}|{}", app.clean_exec_command(), app.terminal),
-        })
+        }, score))
         .collect()
 }
 
-async fn search_directories(query: &str) -> Vec<ActionResult> {
+async fn search_directories(query: &str) -> Vec<(ActionResult, i32)> {
     LOG_TO_FILE(format!("[SPAWNER_UNIFIED] Searching directories for: '{}'", query));
+    
+    // Don't show directories for empty queries - only show top apps
+    if query.is_empty() {
+        LOG_TO_FILE("[SPAWNER_UNIFIED] Empty query - skipping directory search".to_string());
+        return Vec::new();
+    }
     
     let mut potential_actions: Vec<ActionResult> = Vec::new();
     
@@ -224,5 +222,7 @@ async fn search_directories(query: &str) -> Vec<ActionResult> {
     final_actions.truncate(15);
     
     LOG_TO_FILE(format!("[SPAWNER_UNIFIED] Found {} directory results", final_actions.len()));
-    final_actions
+    
+    // Convert to (ActionResult, score) tuples - directories get lower scores
+    final_actions.into_iter().map(|action| (action, 10)).collect() // Give directories score of 10
 }

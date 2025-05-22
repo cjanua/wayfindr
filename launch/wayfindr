@@ -1,1 +1,2 @@
-alacritty --class dotfiles-floating -e wayfindr-bin
+#!/bin/bash
+alacritty --class dotfiles-floating -e ~/cmds/wayfindr-bin

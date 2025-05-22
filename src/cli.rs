@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 use clap::Parser;
 use crate::utils::{DEFAULT_LOG_FILE_PATH};
-use crate::process_execution; // For launching kitty
+// use crate::process_execution; // For launching alacritty
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -32,23 +32,9 @@ pub fn handle_cli_args() -> Result<bool, anyhow::Error> {
             return Ok(true); // Exit early
         }
 
-        match process_execution::launch_kitty_to_view_file(&log_file_to_view) {
-            Ok(_) => {
-                eprintln!("Kitty launched to display logs. The application will now exit.");
-            }
-            Err(e) => {
-                eprintln!("Error launching Kitty: {}", e);
-                eprintln!("Please ensure 'kitty' is installed and in your PATH.");
-                eprintln!("Falling back to printing log to stdout (first 50 lines):");
-                if let Ok(content) = std::fs::read_to_string(&log_file_to_view) {
-                    content.lines().take(50).for_each(|line| eprintln!("{}", line));
-                    if content.lines().count() > 50 {
-                        eprintln!("... (log truncated)");
-                    }
-                } else {
-                    eprintln!("Could not read log file for fallback.")
-                }
-            }
+        
+        if let Ok(content) = std::fs::read_to_string(&log_file_to_view) {
+            content.lines().for_each(|line| eprintln!("{}", line));
         }
         return Ok(true); // Exit after handling --logs
     }

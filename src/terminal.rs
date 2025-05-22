@@ -1,11 +1,11 @@
 // src/terminal.rs
 
-use std::io::stdout;
 use anyhow::{Context, Result as AnyhowResult};
 use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
+use std::io::stdout;
 
 pub fn setup_terminal() -> AnyhowResult<()> {
     enable_raw_mode().context("Failed to enable raw mode")?;

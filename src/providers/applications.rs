@@ -1,14 +1,14 @@
 // src/providers/applications.rs
+use crate::{
+    providers::{ScoredResult, SearchProvider},
+    services::usage,
+    types::{ActionData, ActionMetadata, ActionResult, ActionType, ProviderError, ProviderResult},
+    utils,
+};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use crate::{
-    providers::{SearchProvider, ScoredResult},
-    services::usage,
-    types::{ActionResult, ActionType, ActionData, ActionMetadata, ProviderResult, ProviderError},
-    utils,
-};
 
 #[derive(Debug, Clone)]
 pub struct DesktopApp {
@@ -37,7 +37,7 @@ impl DesktopApp {
         let mut in_desktop_entry = false;
         for line in content.lines() {
             let line = line.trim();
-            
+
             if line == "[Desktop Entry]" {
                 in_desktop_entry = true;
                 continue;
@@ -45,7 +45,7 @@ impl DesktopApp {
                 in_desktop_entry = false;
                 continue;
             }
-            
+
             if !in_desktop_entry || line.is_empty() || line.starts_with('#') {
                 continue;
             }
@@ -57,11 +57,12 @@ impl DesktopApp {
                     "Icon" => app.icon = Some(value.to_string()),
                     "Comment" => app.comment = Some(value.to_string()),
                     "Categories" => {
-                        app.categories = value.split(';')
+                        app.categories = value
+                            .split(';')
                             .filter(|s| !s.is_empty())
                             .map(|s| s.to_string())
                             .collect();
-                    },
+                    }
                     "NoDisplay" => app.no_display = value.to_lowercase() == "true",
                     "Terminal" => app.terminal = value.to_lowercase() == "true",
                     _ => {}
@@ -78,7 +79,9 @@ impl DesktopApp {
 
     fn clean_exec_command(&self) -> String {
         let mut cleaned = self.exec.clone();
-        let field_codes = ["%f", "%F", "%u", "%U", "%d", "%D", "%n", "%N", "%i", "%c", "%k", "%v", "%m"];
+        let field_codes = [
+            "%f", "%F", "%u", "%U", "%d", "%D", "%n", "%N", "%i", "%c", "%k", "%v", "%m",
+        ];
         for code in &field_codes {
             cleaned = cleaned.replace(code, "");
         }
@@ -92,35 +95,38 @@ pub struct ApplicationProvider {
 
 impl ApplicationProvider {
     pub fn new() -> Self {
-        Self {
-            apps: Vec::new(),
-        }
+        Self { apps: Vec::new() }
     }
 
     fn scan_desktop_files(&mut self) -> Result<(), ProviderError> {
         let mut apps = Vec::new();
         let mut seen_names = HashMap::new();
-        
+
         let search_paths = [
             "/usr/share/applications",
-            "/usr/local/share/applications", 
+            "/usr/local/share/applications",
             "~/.local/share/applications",
         ];
 
         for path_str in &search_paths {
             let expanded_path = shellexpand::tilde(path_str);
             let path = Path::new(expanded_path.as_ref());
-            
+
             if !path.exists() {
                 continue;
             }
 
-            let entries = fs::read_dir(path)
-                .map_err(|e| ProviderError::Command(format!("Failed to read directory {}: {}", path.display(), e)))?;
+            let entries = fs::read_dir(path).map_err(|e| {
+                ProviderError::Command(format!(
+                    "Failed to read directory {}: {}",
+                    path.display(),
+                    e
+                ))
+            })?;
 
             for entry in entries.flatten() {
                 let file_path = entry.path();
-                
+
                 if file_path.extension().and_then(|s| s.to_str()) == Some("desktop") {
                     if let Some(app) = DesktopApp::from_desktop_file(&file_path) {
                         if let Some(existing_index) = seen_names.get(&app.name) {
@@ -152,10 +158,10 @@ impl SearchProvider for ApplicationProvider {
 
     fn can_handle(&self, query: &str) -> bool {
         // Handle direct app: prefix or empty query (for top apps)
-        query.is_empty() || 
-        query.starts_with("app:") ||
-        query.starts_with("apps") ||
-        (!query.starts_with("ai:") && !query.starts_with("ask:")) // Handle general queries unless they're AI queries
+        query.is_empty()
+            || query.starts_with("app:")
+            || query.starts_with("apps")
+            || (!query.starts_with("ai:") && !query.starts_with("ask:")) // Handle general queries unless they're AI queries
     }
 
     fn priority(&self) -> u8 {
@@ -183,9 +189,12 @@ impl SearchProvider for ApplicationProvider {
                 let usage_count = usage::get_usage_boost(&utils::generate_id("app", &app.name));
                 if usage_count > 0 {
                     // Use actual usage count as base score for ranking
-                    let actual_usage = usage::get_usage_count(&utils::generate_id("app", &app.name));
-                    utils::log_info(&format!("Empty query - {} has {} uses, boost: {}", 
-                        app.name, actual_usage, usage_count));
+                    let actual_usage =
+                        usage::get_usage_count(&utils::generate_id("app", &app.name));
+                    utils::log_info(&format!(
+                        "Empty query - {} has {} uses, boost: {}",
+                        app.name, actual_usage, usage_count
+                    ));
                     usage_count
                 } else {
                     continue; // Skip unused apps for empty query
@@ -198,7 +207,7 @@ impl SearchProvider for ApplicationProvider {
                     app.comment.as_deref().unwrap_or(""),
                     &app.categories,
                 );
-                
+
                 if base_score > 0 {
                     let usage_boost = usage::get_usage_boost(&utils::generate_id("app", &app.name));
                     base_score + usage_boost
@@ -211,7 +220,9 @@ impl SearchProvider for ApplicationProvider {
             let result = ActionResult {
                 id: action_id,
                 provider: self.id().to_string(),
-                action: ActionType::Launch { needs_terminal: app.terminal },
+                action: ActionType::Launch {
+                    needs_terminal: app.terminal,
+                },
                 title: app.name.clone(),
                 description: app.comment.clone().unwrap_or_default(),
                 data: ActionData::Command(app.clean_exec_command()),
@@ -229,11 +240,14 @@ impl SearchProvider for ApplicationProvider {
 
         // Sort by score and limit results
         matches.sort_by(|a, b| b.score.cmp(&a.score));
-        
+
         if processed_query.is_empty() {
             // For empty query, strictly limit to top 5 most used
             matches.truncate(5);
-            utils::log_info(&format!("Empty query - showing top {} most-used apps", matches.len()));
+            utils::log_info(&format!(
+                "Empty query - showing top {} most-used apps",
+                matches.len()
+            ));
         } else {
             // Normal limit for search queries
             matches.truncate(20);

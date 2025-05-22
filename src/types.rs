@@ -1,6 +1,6 @@
 // src/types.rs
-use thiserror::Error;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionResult {
@@ -42,7 +42,10 @@ pub struct ActionMetadata {
 
 #[derive(Debug, Clone)]
 pub enum SearchMessage {
-    Query { query: String, provider_id: Option<String> },
+    Query {
+        query: String,
+        provider_id: Option<String>,
+    },
     Results(Vec<crate::providers::ScoredResult>),
     Error(String),
     Loading(bool),
@@ -52,19 +55,19 @@ pub enum SearchMessage {
 pub enum AppError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    
+
     #[error("Configuration error: {0}")]
     Config(#[from] anyhow::Error),
-    
+
     #[error("Terminal error: {0}")]
     Terminal(String),
-    
+
     #[error("Action execution error: {0}")]
     ActionExecution(String),
-    
+
     #[error("Provider error: {0}")]
     Provider(#[from] ProviderError),
-    
+
     #[error("Search error: {0}")]
     Search(String),
 }
@@ -73,19 +76,19 @@ pub enum AppError {
 pub enum ProviderError {
     #[error("Network error: {0}")]
     Network(String),
-    
+
     #[error("API error: {status} - {message}")]
     Api { status: u16, message: String },
-    
+
     #[error("Configuration error: {0}")]
     Config(String),
-    
+
     #[error("Data parsing error: {0}")]
     Parsing(String),
-    
+
     #[error("External command failed: {0}")]
     Command(String),
-    
+
     #[error("Provider unavailable: {0}")]
     Unavailable(String),
 }
@@ -112,7 +115,7 @@ impl ActionResult {
             metadata: ActionMetadata::default(),
         }
     }
-    
+
     pub fn new_navigate(
         id: impl Into<String>,
         provider: impl Into<String>,
@@ -130,7 +133,7 @@ impl ActionResult {
             metadata: ActionMetadata::default(),
         }
     }
-    
+
     pub fn new_ai_response(
         id: impl Into<String>,
         title: impl Into<String>,
@@ -146,12 +149,12 @@ impl ActionResult {
             metadata: ActionMetadata::default(),
         }
     }
-    
+
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = description.into();
         self
     }
-    
+
     pub fn with_metadata(mut self, metadata: ActionMetadata) -> Self {
         self.metadata = metadata;
         self

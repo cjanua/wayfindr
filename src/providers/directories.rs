@@ -1,12 +1,12 @@
 // src/providers/directories.rs
+use crate::{
+    providers::{ScoredResult, SearchProvider},
+    types::{ActionData, ActionMetadata, ActionResult, ActionType, ProviderError, ProviderResult},
+    utils,
+};
 use async_trait::async_trait;
 use std::path::Path;
 use tokio::process::Command;
-use crate::{
-    providers::{SearchProvider, ScoredResult},
-    types::{ActionResult, ActionType, ActionData, ActionMetadata, ProviderResult, ProviderError},
-    utils,
-};
 
 pub struct DirectoryProvider;
 
@@ -29,10 +29,10 @@ impl SearchProvider for DirectoryProvider {
     fn can_handle(&self, query: &str) -> bool {
         // Don't handle empty queries (leave those to applications)
         // Don't handle AI queries
-        !query.is_empty() && 
-        !query.starts_with("ai:") && 
-        !query.starts_with("ask:") &&
-        !query.starts_with("app:")
+        !query.is_empty()
+            && !query.starts_with("ai:")
+            && !query.starts_with("ask:")
+            && !query.starts_with("app:")
     }
 
     fn priority(&self) -> u8 {
@@ -103,8 +103,8 @@ impl DirectoryProvider {
                 let result = ActionResult {
                     id: action_id,
                     provider: self.id().to_string(),
-                    action: ActionType::Navigate { 
-                        path: path.to_string() 
+                    action: ActionType::Navigate {
+                        path: path.to_string(),
                     },
                     title: path.to_string(),
                     description: format!("Navigate to {}", path),
@@ -131,14 +131,14 @@ impl DirectoryProvider {
     async fn search_direct_path(&self, query: &str) -> ProviderResult<Vec<ScoredResult>> {
         let expanded_query = shellexpand::tilde(query).into_owned();
         let path = Path::new(&expanded_query);
-        
+
         if path.is_dir() {
             let action_id = utils::generate_id("dir", &expanded_query);
             let result = ActionResult {
                 id: action_id,
                 provider: self.id().to_string(),
-                action: ActionType::Navigate { 
-                    path: expanded_query.clone() 
+                action: ActionType::Navigate {
+                    path: expanded_query.clone(),
                 },
                 title: expanded_query.clone(),
                 description: format!("Navigate to {}", expanded_query),
@@ -155,7 +155,11 @@ impl DirectoryProvider {
             // Direct path matches get higher priority
             let score = 150;
 
-            Ok(vec![ScoredResult::new(result, score, self.id().to_string())])
+            Ok(vec![ScoredResult::new(
+                result,
+                score,
+                self.id().to_string(),
+            )])
         } else {
             Ok(Vec::new())
         }

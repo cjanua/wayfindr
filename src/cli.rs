@@ -1,7 +1,7 @@
 // src/cli.rs
-use std::path::PathBuf;
+use crate::utils::DEFAULT_LOG_FILE_PATH;
 use clap::Parser;
-use crate::utils::{DEFAULT_LOG_FILE_PATH};
+use std::path::PathBuf;
 // use crate::process_execution; // For launching alacritty
 
 #[derive(Parser, Debug)]
@@ -32,7 +32,6 @@ pub fn handle_cli_args() -> Result<bool, anyhow::Error> {
             return Ok(true); // Exit early
         }
 
-        
         if let Ok(content) = std::fs::read_to_string(&log_file_to_view) {
             content.lines().for_each(|line| eprintln!("{}", line));
         }

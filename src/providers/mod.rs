@@ -1,30 +1,30 @@
 // src/providers/mod.rs
-use async_trait::async_trait;
 use crate::types::{ActionResult, ProviderError};
+use async_trait::async_trait;
 
+pub mod ai;
 pub mod applications;
 pub mod directories;
-pub mod ai;
 
 #[async_trait]
 pub trait SearchProvider: Send + Sync {
     /// Unique identifier for this provider
     fn id(&self) -> &'static str;
-    
+
     /// Human-readable name
     fn name(&self) -> &str;
-    
+
     /// Check if this provider can handle the given query
     fn can_handle(&self, query: &str) -> bool;
-    
+
     /// Get the priority of this provider (higher = more important)
     fn priority(&self) -> u8 {
         50 // Default priority
     }
-    
+
     /// Perform the search
     async fn search(&self, query: &str) -> Result<Vec<ScoredResult>, ProviderError>;
-    
+
     /// Optional: Provider-specific configuration
     fn configure(&mut self, _config: &crate::config::Config) {}
 }
@@ -57,20 +57,20 @@ impl ProviderManager {
             providers: Vec::new(),
         }
     }
-    
+
     pub fn register<P: SearchProvider + 'static>(&mut self, provider: P) {
         self.providers.push(Box::new(provider));
     }
-    
+
     pub fn configure_all(&mut self, config: &crate::config::Config) {
         for provider in &mut self.providers {
             provider.configure(config);
         }
     }
-    
+
     pub async fn search_all(&self, query: &str) -> Vec<ScoredResult> {
         let mut all_results = Vec::new();
-        
+
         // Get results from all applicable providers
         for provider in &self.providers {
             if provider.can_handle(query) {
@@ -85,39 +85,42 @@ impl ProviderManager {
                     }
                     Err(e) => {
                         crate::utils::log_error(&format!(
-                            "Provider '{}' failed: {}", 
-                            provider.id(), 
+                            "Provider '{}' failed: {}",
+                            provider.id(),
                             e
                         ));
                     }
                 }
             }
         }
-        
+
         // Sort by score (highest first)
         all_results.sort_by(|a, b| b.score.cmp(&a.score));
-        
+
         // Limit results
         let max_results = crate::config::get_config().general.max_results;
         all_results.truncate(max_results);
-        
+
         all_results
     }
-    
+
     pub fn get_provider(&self, id: &str) -> Option<&dyn SearchProvider> {
-        self.providers.iter().find(|p| p.id() == id).map(|p| p.as_ref())
+        self.providers
+            .iter()
+            .find(|p| p.id() == id)
+            .map(|p| p.as_ref())
     }
 }
 
 impl Default for ProviderManager {
     fn default() -> Self {
         let mut manager = Self::new();
-        
+
         // Register default providers
         manager.register(applications::ApplicationProvider::new());
         manager.register(directories::DirectoryProvider::new());
         manager.register(ai::AiProvider::new());
-        
+
         manager
     }
 }

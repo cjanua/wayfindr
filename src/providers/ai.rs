@@ -1,11 +1,11 @@
 // src/providers/ai.rs
-use async_trait::async_trait;
 use crate::{
-    providers::{SearchProvider, ScoredResult},
+    providers::{ScoredResult, SearchProvider},
     services::ai::query_gemini_api,
-    types::{ActionResult, ActionType, ActionData, ActionMetadata, ProviderResult},
+    types::{ActionData, ActionMetadata, ActionResult, ActionType, ProviderResult},
     utils,
 };
+use async_trait::async_trait;
 
 pub struct AiProvider {
     enabled: bool,

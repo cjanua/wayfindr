@@ -19,18 +19,18 @@ use types::{AppResult, SearchMessage};
 async fn main() -> Result<()> {
     // Initialize configuration first
     config::init_config().context("Failed to initialize configuration")?;
-    
+
     // Initialize services
     services::usage::init_usage_service().context("Failed to initialize usage service")?;
-    
+
     // Handle CLI arguments
     if cli::handle_cli_args()? {
         return Ok(());
     }
-    
+
     // Setup panic handler
     setup_panic_handler();
-    
+
     // Run the application
     run_application().await
 }
@@ -46,28 +46,28 @@ fn setup_panic_handler() {
 async fn run_application() -> Result<()> {
     // Setup terminal
     terminal::setup_terminal().context("Failed to setup terminal")?;
-    
+
     // Create terminal and app
     let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
     let mut terminal = ratatui::Terminal::new(backend)?;
     let mut app = App::new().await?;
-    
+
     // Create message channel for async communication
     let (search_tx, search_rx) = mpsc::channel::<SearchMessage>(32);
-    
+
     // Run main loop
     let result = app.run(&mut terminal, search_tx, search_rx).await;
-    
+
     // Cleanup
     terminal::restore_terminal().context("Failed to restore terminal")?;
-    
+
     result.map_err(|e| anyhow::anyhow!("Application error: {}", e))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_config_initialization() {
         // This test ensures config can be initialized without panicking

@@ -1,9 +1,9 @@
 // src/ui.rs
+use crate::app::{App, FocusState};
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Clear},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
 };
-use crate::app::{App, FocusState};
 
 pub fn render(frame: &mut Frame, app: &App) {
     let main_layout = Layout::default()
@@ -18,7 +18,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_input(frame, app, main_layout[0]);
     render_results(frame, app, main_layout[1]);
     render_status_bar(frame, app, main_layout[2]);
-    
+
     // Render error popup if there's an error
     if let Some(ref error) = app.error_message {
         render_error_popup(frame, error);
@@ -86,12 +86,17 @@ fn render_results_list(frame: &mut Frame, app: &App, area: Rect, block: Block) {
         .map(|(i, result)| {
             let icon = get_result_icon(result);
             let provider_tag = format!("[{}]", result.provider);
-            
+
             let item_text = if result.description.is_empty() {
                 format!("{} {} {}", icon, provider_tag, result.title)
             } else {
-                format!("{} {} {} - {}", icon, provider_tag, result.title, 
-                       truncate_description(&result.description, 60))
+                format!(
+                    "{} {} {} - {}",
+                    icon,
+                    provider_tag,
+                    result.title,
+                    truncate_description(&result.description, 60)
+                )
             };
 
             let style = if app.focus == FocusState::Results && i == app.selected_index {
@@ -118,19 +123,19 @@ fn render_results_list(frame: &mut Frame, app: &App, area: Rect, block: Block) {
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let mut status_parts = Vec::new();
-    
+
     // Focus indicator
     let focus_text = match app.focus {
         FocusState::Input => "INPUT",
         FocusState::Results => "RESULTS",
     };
     status_parts.push(format!("Focus: {}", focus_text));
-    
+
     // History indicator
     if !app.history.is_empty() {
         status_parts.push(format!("History: {}", app.history.len()));
     }
-    
+
     // Controls
     status_parts.push("ESC:Exit".to_string());
     status_parts.push("TAB:Switch".to_string());
@@ -138,18 +143,17 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     status_parts.push("Enter:Select".to_string());
 
     let status_text = status_parts.join(" | ");
-    let status_paragraph = Paragraph::new(status_text)
-        .style(Style::default().fg(Color::DarkGray));
+    let status_paragraph = Paragraph::new(status_text).style(Style::default().fg(Color::DarkGray));
 
     frame.render_widget(status_paragraph, area);
 }
 
 fn render_error_popup(frame: &mut Frame, error_message: &str) {
     let popup_area = centered_rect(60, 20, frame.area());
-    
+
     // Clear the background
     frame.render_widget(Clear, popup_area);
-    
+
     let error_paragraph = Paragraph::new(error_message)
         .style(Style::default().fg(Color::Red))
         .block(
@@ -158,16 +162,20 @@ fn render_error_popup(frame: &mut Frame, error_message: &str) {
                 .title("Error")
                 .border_style(Style::default().fg(Color::Red)),
         );
-    
+
     frame.render_widget(error_paragraph, popup_area);
 }
 
 fn get_result_icon(result: &crate::types::ActionResult) -> &'static str {
     use crate::types::ActionType;
-    
+
     match &result.action {
-        ActionType::Launch { needs_terminal: true } => "⚡",
-        ActionType::Launch { needs_terminal: false } => "🚀",
+        ActionType::Launch {
+            needs_terminal: true,
+        } => "⚡",
+        ActionType::Launch {
+            needs_terminal: false,
+        } => "🚀",
         ActionType::Navigate { .. } => "📁",
         ActionType::AiResponse => "🤖",
         ActionType::Custom { .. } => "⚙️",

@@ -1,9 +1,9 @@
 // src/services/ai.rs
+use crate::utils;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::env;
 use thiserror::Error;
-use crate::utils;
 
 const GEMINI_API_URL_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models/";
 const DEFAULT_MODEL: &str = "gemini-1.5-flash-latest";
@@ -83,31 +83,35 @@ pub async fn query_gemini_api(prompt: String) -> Result<String, AiError> {
         }),
     };
 
-    let url = format!("{}{}:generateContent?key={}", GEMINI_API_URL_BASE, DEFAULT_MODEL, api_key);
-    
+    let url = format!(
+        "{}{}:generateContent?key={}",
+        GEMINI_API_URL_BASE, DEFAULT_MODEL, api_key
+    );
+
     utils::log_debug(&format!("Sending request to Gemini API: {}", DEFAULT_MODEL));
 
-    let res = client
-        .post(&url)
-        .json(&request_body)
-        .send()
-        .await?;
+    let res = client.post(&url).json(&request_body).send().await?;
 
     if !res.status().is_success() {
         let status = res.status().as_u16();
-        let error_text = res.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_text = res
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         utils::log_error(&format!("Gemini API error: {} - {}", status, error_text));
-        return Err(AiError::ApiError { status, message: error_text });
+        return Err(AiError::ApiError {
+            status,
+            message: error_text,
+        });
     }
 
     let response_text = res.text().await?;
     utils::log_debug(&format!("Received response from Gemini API"));
 
-    let parsed_response: GeminiResponse = serde_json::from_str(&response_text)
-        .map_err(|e| {
-            utils::log_error(&format!("JSON parsing error: {}", e));
-            AiError::ResponseParsing(e.to_string())
-        })?;
+    let parsed_response: GeminiResponse = serde_json::from_str(&response_text).map_err(|e| {
+        utils::log_error(&format!("JSON parsing error: {}", e));
+        AiError::ResponseParsing(e.to_string())
+    })?;
 
     if let Some(candidates) = parsed_response.candidates {
         if let Some(first_candidate) = candidates.first() {
@@ -117,7 +121,7 @@ pub async fn query_gemini_api(prompt: String) -> Result<String, AiError> {
             }
         }
     }
-    
+
     utils::log_error("No usable content found in API response");
     Err(AiError::NoContent)
 }

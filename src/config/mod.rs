@@ -1,8 +1,8 @@
 // src/config/mod.rs
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::PathBuf;
 
 const CONFIG_DIR_NAME: &str = ".wayfindr";
 const CONFIG_FILE_NAME: &str = "config.toml";
@@ -91,19 +91,18 @@ impl Default for Config {
 impl Config {
     pub fn load() -> Result<Self> {
         let config_path = get_config_file_path();
-        
+
         if config_path.exists() {
-            let content = fs::read_to_string(&config_path)
-                .context("Failed to read config file")?;
-            let mut config: Config = toml::from_str(&content)
-                .context("Failed to parse config file")?;
-            
+            let content = fs::read_to_string(&config_path).context("Failed to read config file")?;
+            let mut config: Config =
+                toml::from_str(&content).context("Failed to parse config file")?;
+
             // Update paths to be absolute
             config.paths.config_dir = get_config_dir();
             config.paths.log_file = config.paths.config_dir.join("wayfindr.log");
             config.paths.usage_stats_file = config.paths.config_dir.join("usage_stats.txt");
             config.paths.cache_dir = config.paths.config_dir.join("cache");
-            
+
             Ok(config)
         } else {
             let config = Self::default();
@@ -111,23 +110,19 @@ impl Config {
             Ok(config)
         }
     }
-    
+
     pub fn save(&self) -> Result<()> {
         let config_dir = get_config_dir();
-        fs::create_dir_all(&config_dir)
-            .context("Failed to create config directory")?;
-        
+        fs::create_dir_all(&config_dir).context("Failed to create config directory")?;
+
         // Ensure other directories exist
-        fs::create_dir_all(&self.paths.cache_dir)
-            .context("Failed to create cache directory")?;
-        
+        fs::create_dir_all(&self.paths.cache_dir).context("Failed to create cache directory")?;
+
         let config_path = get_config_file_path();
-        let toml_content = toml::to_string_pretty(self)
-            .context("Failed to serialize config")?;
-        
-        fs::write(&config_path, toml_content)
-            .context("Failed to write config file")?;
-        
+        let toml_content = toml::to_string_pretty(self).context("Failed to serialize config")?;
+
+        fs::write(&config_path, toml_content).context("Failed to write config file")?;
+
         Ok(())
     }
 }
@@ -148,10 +143,14 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 
 pub fn init_config() -> Result<()> {
     let config = Config::load()?;
-    CONFIG.set(config).map_err(|_| anyhow::anyhow!("Config already initialized"))?;
+    CONFIG
+        .set(config)
+        .map_err(|_| anyhow::anyhow!("Config already initialized"))?;
     Ok(())
 }
 
 pub fn get_config() -> &'static Config {
-    CONFIG.get().expect("Config not initialized. Call init_config() first.")
+    CONFIG
+        .get()
+        .expect("Config not initialized. Call init_config() first.")
 }

@@ -1,15 +1,14 @@
 // src/app.rs
-use std::time::Duration;
-use tokio::sync::mpsc;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{backend::CrosstermBackend, Terminal};
+use std::time::Duration;
+use tokio::sync::mpsc;
 
 use crate::{
     config::get_config,
     providers::ProviderManager,
     services::{execution::ExecutionService, usage},
     types::{ActionResult, AppResult, SearchMessage},
-    utils,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,15 +25,15 @@ pub struct App {
     pub focus: FocusState,
     pub is_loading: bool,
     pub error_message: Option<String>,
-    
+
     // History
     pub history: Vec<String>,
     pub history_index: Option<usize>,
-    
+
     // Services
     provider_manager: ProviderManager,
     execution_service: ExecutionService,
-    
+
     // Control
     should_exit: bool,
 }
@@ -44,9 +43,9 @@ impl App {
         let config = get_config();
         let mut provider_manager = ProviderManager::default();
         provider_manager.configure_all(config);
-        
+
         let execution_service = ExecutionService::new();
-        
+
         let mut app = Self {
             input: String::new(),
             results: Vec::new(),
@@ -60,20 +59,20 @@ impl App {
             execution_service,
             should_exit: false,
         };
-        
+
         // Load initial results (top used apps)
         app.load_initial_results().await;
-        
+
         Ok(app)
     }
-    
+
     // Update the load_initial_results method to show actual top used apps
     async fn load_initial_results(&mut self) {
         let top_used = usage::get_top_used(5);
         if !top_used.is_empty() {
             // Get the actual app names and try to find them in the applications provider
             let mut initial_results = Vec::new();
-            
+
             for app_id in top_used {
                 // Try to reconstruct ActionResult from usage data
                 // This is a simplified approach - you might want to cache app data
@@ -81,7 +80,7 @@ impl App {
                     initial_results.push(result);
                 }
             }
-            
+
             self.results = initial_results;
             self.selected_index = 0;
         } else {
@@ -89,7 +88,7 @@ impl App {
             self.results = Vec::new();
         }
     }
-    
+
     // Add helper method to check if query is AI-related
     fn is_ai_query(&self, query: &str) -> bool {
         let config = get_config();
@@ -100,13 +99,13 @@ impl App {
     async fn get_app_by_id(&self, app_id: &str) -> Option<ActionResult> {
         // This is a simplified implementation
         // You might want to cache application data or query the provider directly
-        
+
         // Extract app name from ID (assuming format like "app_<hash>")
         if app_id.starts_with("app_") {
             // For now, create a simple launch action
             // In a real implementation, you'd want to store more app metadata
             let app_name = app_id.strip_prefix("app_").unwrap_or(app_id);
-            
+
             Some(ActionResult::new_launch(
                 app_id.to_string(),
                 "applications",
@@ -128,15 +127,15 @@ impl App {
     ) -> AppResult<()> {
         // Load initial results (top used apps) instead of empty search
         self.load_initial_results().await;
-        
+
         loop {
             if self.should_exit {
                 break;
             }
-            
+
             // Draw UI
             terminal.draw(|frame| crate::ui::render(frame, self))?;
-            
+
             // Handle events with timeout
             if event::poll(Duration::from_millis(50))? {
                 if let Event::Key(key_event) = event::read()? {
@@ -145,16 +144,16 @@ impl App {
                     }
                 }
             }
-            
+
             // Handle search messages
             while let Ok(message) = search_rx.try_recv() {
                 self.handle_search_message(message);
             }
         }
-        
+
         Ok(())
     }
-    
+
     async fn handle_key_event(
         &mut self,
         event: KeyEvent,
@@ -162,41 +161,35 @@ impl App {
     ) -> AppResult<()> {
         match event.code {
             KeyCode::Esc => self.should_exit = true,
-            
-            KeyCode::Enter => {
-                match self.focus {
-                    FocusState::Input => {
-                        self.handle_input_enter(search_tx).await?;
-                    }
-                    FocusState::Results => {
-                        self.handle_result_selection().await?;
-                    }
+
+            KeyCode::Enter => match self.focus {
+                FocusState::Input => {
+                    self.handle_input_enter(search_tx).await?;
                 }
-            }
-            
+                FocusState::Results => {
+                    self.handle_result_selection().await?;
+                }
+            },
+
             KeyCode::Tab => {
                 self.cycle_focus();
             }
-            
-            KeyCode::Up => {
-                match self.focus {
-                    FocusState::Input => self.navigate_history(-1),
-                    FocusState::Results => self.navigate_results(-1),
-                }
-            }
-            
-            KeyCode::Down => {
-                match self.focus {
-                    FocusState::Input => self.navigate_history(1),
-                    FocusState::Results => self.navigate_results(1),
-                }
-            }
-            
+
+            KeyCode::Up => match self.focus {
+                FocusState::Input => self.navigate_history(-1),
+                FocusState::Results => self.navigate_results(-1),
+            },
+
+            KeyCode::Down => match self.focus {
+                FocusState::Input => self.navigate_history(1),
+                FocusState::Results => self.navigate_results(1),
+            },
+
             KeyCode::Char(c) => {
                 if self.focus == FocusState::Input {
                     self.input.push(c);
                     self.history_index = None;
-                    
+
                     // Only trigger live search for NON-AI queries
                     if get_config().search.enable_live_search && !self.is_ai_query(&self.input) {
                         let input = self.input.clone();
@@ -204,12 +197,12 @@ impl App {
                     }
                 }
             }
-            
+
             KeyCode::Backspace => {
                 if self.focus == FocusState::Input && !self.input.is_empty() {
                     self.input.pop();
                     self.history_index = None;
-                    
+
                     // Only trigger live search for NON-AI queries
                     if get_config().search.enable_live_search && !self.is_ai_query(&self.input) {
                         let input = self.input.clone();
@@ -220,44 +213,43 @@ impl App {
                     }
                 }
             }
-            
+
             _ => {}
         }
-        
+
         Ok(())
     }
-    
-    
+
     async fn handle_input_enter(
         &mut self,
         search_tx: &mpsc::Sender<SearchMessage>,
     ) -> AppResult<()> {
         let query = self.input.trim().to_string();
-        
+
         if !query.is_empty() {
             // Add to history
             self.add_to_history(query.clone());
-            
+
             // Clear input and perform search
             self.input.clear();
             self.history_index = None;
             self.perform_search(&query, search_tx).await;
-            
+
             // Switch focus to results if we have any
             if !self.results.is_empty() {
                 self.focus = FocusState::Results;
                 self.selected_index = 0;
             }
         }
-        
+
         Ok(())
     }
-    
+
     async fn handle_result_selection(&mut self) -> AppResult<()> {
         if let Some(result) = self.results.get(self.selected_index) {
             // Record usage
             usage::record_usage(&result.id);
-            
+
             // Execute the action
             match self.execution_service.execute(result).await {
                 Ok(should_exit) => {
@@ -277,41 +269,35 @@ impl App {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
-    async fn perform_search(
-        &mut self,
-        query: &str,
-        search_tx: &mpsc::Sender<SearchMessage>,
-    ) {
+
+    async fn perform_search(&mut self, query: &str, search_tx: &mpsc::Sender<SearchMessage>) {
         self.is_loading = true;
         self.error_message = None;
-        
+
         let search_tx = search_tx.clone();
         let query = query.to_string();
         let provider_manager = self.provider_manager.clone();
-        
+
         tokio::spawn(async move {
             let results = provider_manager.search_all(&query).await;
-            
+
             let message = if results.is_empty() {
                 SearchMessage::Results(Vec::new())
             } else {
                 SearchMessage::Results(results)
             };
-            
+
             let _ = search_tx.send(message).await;
         });
     }
-    
+
     fn handle_search_message(&mut self, message: SearchMessage) {
         match message {
             SearchMessage::Results(scored_results) => {
-                self.results = scored_results.into_iter()
-                    .map(|sr| sr.result)
-                    .collect();
+                self.results = scored_results.into_iter().map(|sr| sr.result).collect();
                 self.selected_index = 0;
                 self.is_loading = false;
             }
@@ -325,7 +311,7 @@ impl App {
             _ => {}
         }
     }
-    
+
     fn cycle_focus(&mut self) {
         match self.focus {
             FocusState::Input => {
@@ -339,15 +325,19 @@ impl App {
             }
         }
     }
-    
+
     fn navigate_history(&mut self, direction: i32) {
         if self.history.is_empty() {
             return;
         }
-        
+
         let new_index = match self.history_index {
             None => {
-                if direction > 0 { 0 } else { self.history.len() - 1 }
+                if direction > 0 {
+                    0
+                } else {
+                    self.history.len() - 1
+                }
             }
             Some(current) => {
                 if direction > 0 {
@@ -357,40 +347,40 @@ impl App {
                 }
             }
         };
-        
+
         self.history_index = Some(new_index);
         self.input = self.history[new_index].clone();
     }
-    
+
     fn navigate_results(&mut self, direction: i32) {
         if self.results.is_empty() {
             return;
         }
-        
+
         if direction > 0 {
             self.selected_index = (self.selected_index + 1).min(self.results.len() - 1);
         } else {
             self.selected_index = self.selected_index.saturating_sub(1);
         }
     }
-    
+
     fn add_to_history(&mut self, query: String) {
         let config = get_config();
-        
+
         // Don't add if it's the same as the last entry
         if self.history.first() == Some(&query) {
             return;
         }
-        
+
         // Add to front of history
         self.history.insert(0, query);
-        
+
         // Trim to configured limit
         if self.history.len() > config.general.history_limit {
             self.history.truncate(config.general.history_limit);
         }
     }
-    
+
     pub fn clear_error(&mut self) {
         self.error_message = None;
     }

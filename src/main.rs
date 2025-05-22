@@ -101,28 +101,35 @@ async fn run_app_loop(
                         KeyCode::Char(c) => {
                             if app.focus == FocusBlock::Input { 
                                 app.input.push(c);
-                                
-                                // *** ADD THIS: Trigger search immediately ***
-                                app.clear_prev();
-                                app.is_loading = true;
-                                
-                                let query = app.input.trim().to_string();
-                                
-                                // Same logic as Enter but triggered on every keystroke
-                                if query.to_lowercase().starts_with("ai:") || query.to_lowercase().starts_with("ask:") {
-                                    let ai_prompt_content = query.split_at(query.find(':').unwrap_or(0) + 1).1.trim().to_string();
-                                    if !ai_prompt_content.is_empty() {
-                                        spawn_ai_query(ai_prompt_content, sender.clone());
+                                // Clear prev Output while typing ai query
+                                if app.input.to_lowercase() == "ai:" {
+                                    app.clear_prev();
+                                    app.is_loading = true;
+                                }
+                                // Don't waste my API tokens
+                                if !app.input.to_lowercase().contains("ai:") {
+                                    // *** ADD THIS: Trigger search immediately ***
+                                    app.clear_prev();
+                                    app.is_loading = true;
+                                    
+                                    let query = app.input.trim().to_string();
+                                    
+                                    // Same logic as Enter but triggered on every keystroke
+                                    if query.to_lowercase().starts_with("ai:") || query.to_lowercase().starts_with("ask:") {
+                                        let ai_prompt_content = query.split_at(query.find(':').unwrap_or(0) + 1).1.trim().to_string();
+                                        if !ai_prompt_content.is_empty() {
+                                            spawn_ai_query(ai_prompt_content, sender.clone());
+                                        } else {
+                                            app.err_msg = "AI query is empty.".to_string();
+                                            app.is_loading = false;
+                                        }
+                                    } else if query.to_lowercase().starts_with("app:") {
+                                        let app_query = query.split_at(4).1.trim().to_string();
+                                        spawn_app_search(app_query, sender.clone());
                                     } else {
-                                        app.err_msg = "AI query is empty.".to_string();
-                                        app.is_loading = false;
+                                        // Default: unified search
+                                        spawn_unified_search(query, sender.clone());
                                     }
-                                } else if query.to_lowercase().starts_with("app:") {
-                                    let app_query = query.split_at(4).1.trim().to_string();
-                                    spawn_app_search(app_query, sender.clone());
-                                } else {
-                                    // Default: unified search
-                                    spawn_unified_search(query, sender.clone());
                                 }
                             }                        
                         }
@@ -157,12 +164,27 @@ async fn run_app_loop(
                         KeyCode::Tab => { // Cycle focus: Input -> Output -> History -> Input
                             match app.focus {
                                 FocusBlock::Input => {
-                                    if !app.output.is_empty() { app.focus = FocusBlock::Output; app.selected_output_index = 0; }
-                                    else if !app.history.is_empty() { app.focus = FocusBlock::History; if app.history_index.is_none() { app.history_index = Some(0); app.input = app.history[0].clone();}}
+                                    if !app.output.is_empty() {
+                                        app.focus = FocusBlock::Output; app.selected_output_index = 0;
+                                    } 
+                                    // else if !app.history.is_empty() {
+                                    //     app.focus = FocusBlock::History;
+                                    //     if app.history_index.is_none() {
+                                    //         app.history_index = Some(0);
+                                    //         app.input = app.history[0].clone();
+                                    //     }
+                                    // }
                                 }
                                 FocusBlock::Output => {
-                                    if !app.history.is_empty() { app.focus = FocusBlock::History; if app.history_index.is_none() { app.history_index = Some(0); app.input = app.history[0].clone();}}
-                                    else { app.focus = FocusBlock::Input; }
+                                    // if !app.history.is_empty() {
+                                    //     app.focus = FocusBlock::History;
+                                    //     if app.history_index.is_none() {
+                                    //         app.history_index = Some(0); app.input = app.history[0].clone();
+                                    //     }
+                                    // }
+                                    // else {
+                                    app.focus = FocusBlock::Input;
+                                    // }
                                 }
                                 FocusBlock::History => app.focus = FocusBlock::Input,
                             }
@@ -177,7 +199,7 @@ async fn run_app_loop(
                                         if app.history.is_empty() || app.history[0] != query {
                                             app.history.insert(0, query.clone());
                                         }
-                                        if app.history.len() > 16 { app.history.pop(); }
+                                        // if app.history.len() > 16 { app.history.pop(); }
                                         
                                         app.input.clear();
                                         app.clear_prev(); // Clear previous output/errors

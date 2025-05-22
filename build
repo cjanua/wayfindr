@@ -1,4 +1,59 @@
+#!/bin/bash
+# build
+
+echo "🔧 Building wayfindr..."
 cargo build --release
 
+echo "📦 Installing binaries..."
 mv target/release/wayfindr ~/cmds/wayfindr-bin
 cp launch/wayfindr ~/cmds/wayfindr
+
+
+echo "🔑 Checking environment variables..."
+if [ -f ".env" ]; then
+    echo "📄 Found .env file, processing variables..."
+    
+    # Read .env file line by line
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Skip empty lines and comments
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        
+        # Extract variable name and value
+        if [[ "$line" =~ ^[[:space:]]*([^=]+)=(.*)$ ]]; then
+            var_name="${BASH_REMATCH[1]}"
+            var_value="${BASH_REMATCH[2]}"
+            
+            # Remove leading/trailing whitespace
+            var_name=$(echo "$var_name" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            var_value=$(echo "$var_value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            
+            # Remove quotes if present
+            var_value=$(echo "$var_value" | sed 's/^["'\'']\(.*\)["'\'']$/\1/')
+            
+            echo "🔍 Processing variable: $var_name"
+            
+            # Check if variable is already set in ~/.bashrc
+            if grep -q "^export $var_name=" ~/.bashrc; then
+                echo "✅ $var_name already exists in ~/.bashrc"
+            else
+                echo "➕ Adding $var_name to ~/.bashrc"
+                echo "" >> ~/.bashrc
+                echo "# Added by wayfindr build script on $(date)" >> ~/.bashrc
+                echo "export $var_name=\"$var_value\"" >> ~/.bashrc
+                echo "✅ Added $var_name to ~/.bashrc"
+            fi
+            
+            # Also set for current session
+            export "$var_name=$var_value"
+        fi
+    done < .env
+    
+    echo "🔄 Environment variables processed. You may need to restart your session or run 'source ~/.bashrc'"
+else
+    echo "⚠️  No .env file found. Create one with your environment variables if needed."
+    echo "Example .env file:"
+    echo "GEMINI_API_KEY=your-api-key-here"
+fi
+
+echo "✅ Build complete! wayfindr is ready to use."
+echo "🚀 Launch with: wayfindr"

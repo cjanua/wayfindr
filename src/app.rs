@@ -28,7 +28,7 @@ impl App {
         let app = Self {
             input: String::new(),
             output: vec![],
-            history: vec![],
+            history: vec!["".to_string()],
             exit_flag: false,
             err_msg: String::new(),
             is_loading: true,

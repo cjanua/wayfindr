@@ -75,6 +75,28 @@ impl App {
                     Err(AppError::ActionError(err_msg))
                 }
             }
+            "app" => {
+                if action_result.action == "launch" {
+                    let exec_command = &action_result.data;
+                    match process_execution::launch_application(exec_command) {
+                        Ok(_) => {
+                            LOG_TO_FILE(format!("[APP_ACTION] Application launched successfully: {}", exec_command));
+                            // Don't exit for app launches, just clear and return to input
+                        }
+                        Err(e) => {
+                            LOG_TO_FILE(format!("[APP_ACTION] Failed to launch application. Command: {}, Error: {}", exec_command, e));
+                            self.err_msg = format!("Failed to launch application '{}': {}", exec_command, e);
+                            return Err(AppError::ActionError(format!("Failed to launch application: {}", e)));
+                        }
+                    }
+                    Ok(())
+                } else {
+                    let err_msg = format!("Unknown action '{}' for spawner '{}'", action_result.action, action_result.spawner);
+                    LOG_TO_FILE(err_msg.clone());
+                    self.err_msg = err_msg.clone();
+                    Err(AppError::ActionError(err_msg))
+                }
+            }
             _ => {
                 let err_msg = format!("Unknown spawner '{}'", action_result.spawner);
                 LOG_TO_FILE(err_msg.clone());

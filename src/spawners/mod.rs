@@ -5,6 +5,7 @@
 // src/spawners/mod.rs
 pub mod path_search;
 pub mod ai_query;
+pub mod apps;
 
 // pub trait Provider {
 //     fn name(&self) -> &str;

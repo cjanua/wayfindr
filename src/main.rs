@@ -25,6 +25,7 @@ use utils::LOG_TO_FILE;
 use spawners::{
     path_search::spawn_path_search,
     ai_query::spawn_ai_query,
+    apps::spawn_app_search
 };
 
 #[cfg(test)]
@@ -140,6 +141,15 @@ async fn run_app_loop(
                                                 app.err_msg = "AI query is empty.".to_string();
                                                 app.is_loading = false;
                                             }
+                                        } else if query.to_lowercase().starts_with("app:") || query.to_lowercase() == "apps" {
+                                            // App search mode
+                                            let app_query = if query.to_lowercase() == "apps" {
+                                                String::new() // Empty query shows all apps
+                                            } else {
+                                                query.split_at(query.find(':').unwrap_or(0) + 1).1.trim().to_string()
+                                            };
+                                            LOG_TO_FILE(format!("[APP_TRIGGER] Spawning app search for: '{}'", app_query));
+                                            spawn_app_search(app_query, sender.clone());
                                         } else {
                                             // Default to path search
                                             spawn_path_search(query, sender.clone());
@@ -162,8 +172,15 @@ async fn run_app_loop(
                                             match app.handle_action_execution(&selected_action).await {
                                                 Ok(_) => {
                                                     LOG_TO_FILE("[ACTION_EXEC] handle_action_execution successful.".to_string());
-                                                    if selected_action.action == "cd" { app.exit_flag = true; }
-                                                    else { app.output.clear(); app.err_msg.clear(); app.selected_output_index = 0; app.focus = FocusBlock::Input; }
+                                                    if selected_action.action == "cd" { 
+                                                        app.exit_flag = true; 
+                                                    } else { 
+                                                        // For app launches and other actions, clear results and return to input
+                                                        app.output.clear(); 
+                                                        app.err_msg.clear(); 
+                                                        app.selected_output_index = 0; 
+                                                        app.focus = FocusBlock::Input; 
+                                                    }
                                                 }
                                                 Err(e) => {
                                                     LOG_TO_FILE(format!("[ACTION_EXEC] handle_action_execution failed: {:?}", e));
@@ -192,6 +209,13 @@ async fn run_app_loop(
                                                         app.err_msg = "AI query from history is empty.".to_string();
                                                         app.is_loading = false;
                                                     }
+                                                } else if query_from_history.to_lowercase().starts_with("app:") || query_from_history.to_lowercase() == "apps" {
+                                                    let app_query = if query_from_history.to_lowercase() == "apps" {
+                                                        String::new()
+                                                    } else {
+                                                        query_from_history.split_at(query_from_history.find(':').unwrap_or(0) + 1).1.trim().to_string()
+                                                    };
+                                                    spawn_app_search(app_query, sender.clone());
                                                 } else {
                                                     spawn_path_search(query_from_history, sender.clone());
                                                 }

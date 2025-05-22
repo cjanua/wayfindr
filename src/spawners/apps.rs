@@ -1,4 +1,4 @@
-// src/spawners/apps.rs
+// src/spawners/app_provider.rs
 use crate::types::{AsyncResult, ActionResult};
 use crate::usage_tracker::UsageStats;
 use std::collections::HashMap;
@@ -234,7 +234,7 @@ pub fn spawn_app_search(query: String, tx: tokio_mpsc::Sender<AsyncResult>) {
 }
 
 // Simple fuzzy matching function
-fn fuzzy_match(text: &[char], pattern: &[char]) -> bool {
+pub fn fuzzy_match(text: &[char], pattern: &[char]) -> bool {
     if pattern.is_empty() {
         return true;
     }

@@ -6,6 +6,8 @@
 pub mod path_search;
 pub mod ai_query;
 pub mod apps;
+pub mod unified_search;
+
 
 // pub trait Provider {
 //     fn name(&self) -> &str;

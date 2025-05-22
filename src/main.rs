@@ -1,6 +1,7 @@
 // src/main.rs
 use std::io::{Stdout};
 use std::time::Duration;
+use spawners::unified_search::spawn_unified_search;
 use tokio::sync::mpsc as tokio_mpsc;
 
 use anyhow::{Context, Result as AnyhowResult};
@@ -24,7 +25,7 @@ use types::{ActionResult, AppError, AsyncResult};
 use app::{App, FocusBlock};
 use utils::LOG_TO_FILE;
 use spawners::{
-    path_search::spawn_path_search,
+    // path_search::spawn_path_search,
     ai_query::spawn_ai_query,
     apps::spawn_app_search
 };
@@ -152,8 +153,9 @@ async fn run_app_loop(
                                             LOG_TO_FILE(format!("[APP_TRIGGER] Spawning app search for: '{}'", app_query));
                                             spawn_app_search(app_query, sender.clone());
                                         } else {
-                                            // Default to path search
-                                            spawn_path_search(query, sender.clone());
+                                            // Default: unified search (apps + directories)
+                                            LOG_TO_FILE(format!("[UNIFIED_TRIGGER] Spawning unified search for: '{}'", query));
+                                            spawn_unified_search(query, sender.clone());
                                         }
                                     } else if !app.output.is_empty() { // Input empty, try to activate selected output
                                         app.focus = FocusBlock::Output; 
@@ -218,7 +220,7 @@ async fn run_app_loop(
                                                     };
                                                     spawn_app_search(app_query, sender.clone());
                                                 } else {
-                                                    spawn_path_search(query_from_history, sender.clone());
+                                                    spawn_unified_search(query_from_history, sender.clone());
                                                 }
                                             }
                                         }

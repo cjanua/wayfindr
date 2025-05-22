@@ -5,6 +5,7 @@ use tokio::sync::mpsc as tokio_mpsc;
 use tokio::process::Command;
 use shellexpand;
 
+#[allow(dead_code)]
 pub fn spawn_path_search(query: String, tx: tokio_mpsc::Sender<AsyncResult>) {
     tokio::spawn(async move {
         let mut potential_actions: Vec<ActionResult> = Vec::new();

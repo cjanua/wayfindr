@@ -18,6 +18,7 @@ mod utils;
 mod terminal;
 mod spawners;
 mod services;
+mod usage_tracker;
 
 use types::{ActionResult, AppError, AsyncResult};
 use app::{App, FocusBlock};

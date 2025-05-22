@@ -1,5 +1,6 @@
 // src/app.rs
 use crate::types::{ActionResult, AppError};
+use crate::usage_tracker::UsageStats;
 use crate::utils::LOG_TO_FILE;
 use crate::process_execution; // For launching kitty for cd
 
@@ -82,9 +83,29 @@ impl App {
                     let exec_command = parts[0];
                     let needs_terminal = parts.get(1).map(|s| *s == "true").unwrap_or(false);
                     
+                    // Extract app name from description for usage tracking
+                    let app_name = if let Some(dash_pos) = action_result.description.find(" - ") {
+                        action_result.description[..dash_pos].trim()
+                    } else {
+                        action_result.description.trim()
+                    };
+                    
+                    // Remove the "[app] launch :: " prefix if it exists
+                    let clean_app_name = if app_name.starts_with("[app] launch :: ") {
+                        &app_name[16..]
+                    } else {
+                        app_name
+                    };
+                    
                     match process_execution::launch_application(exec_command, needs_terminal) {
                         Ok(_) => {
                             LOG_TO_FILE(format!("[APP_ACTION] Application launched successfully: {} (terminal: {})", exec_command, needs_terminal));
+                            
+                            // Increment usage count for this app
+                            let mut usage_stats = UsageStats::new();
+                            usage_stats.increment_usage(clean_app_name);
+                            LOG_TO_FILE(format!("[APP_ACTION] Incremented usage count for '{}'", clean_app_name));
+                            
                             // Don't exit for app launches, just clear and return to input
                         }
                         Err(e) => {

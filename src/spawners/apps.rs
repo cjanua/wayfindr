@@ -1,5 +1,6 @@
-// src/spawners/app.rs
+// src/spawners/apps.rs
 use crate::types::{AsyncResult, ActionResult};
+use crate::usage_tracker::UsageStats;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -140,6 +141,7 @@ pub fn spawn_app_search(query: String, tx: tokio_mpsc::Sender<AsyncResult>) {
         
         let apps = scan_desktop_files();
         let query_lower = query.to_lowercase();
+        let usage_stats = UsageStats::new();
         
         let mut matches: Vec<(DesktopApp, i32)> = apps
             .into_iter()
@@ -147,7 +149,7 @@ pub fn spawn_app_search(query: String, tx: tokio_mpsc::Sender<AsyncResult>) {
                 let name_lower = app.name.to_lowercase();
                 let comment_lower = app.comment.as_ref().map(|c| c.to_lowercase()).unwrap_or_default();
                 
-                // Scoring system for relevance
+                // Base scoring system for relevance
                 let mut score = 0;
                 
                 if query.is_empty() {
@@ -187,6 +189,13 @@ pub fn spawn_app_search(query: String, tx: tokio_mpsc::Sender<AsyncResult>) {
                 }
                 
                 if score > 0 {
+                    // Add usage boost to the score
+                    let usage_boost = usage_stats.get_usage_boost(&app.name);
+                    score += usage_boost;
+                    
+                    LOG_TO_FILE(format!("[SPAWNER_APP] {} -> base_score: {}, usage_boost: {}, final_score: {}", 
+                        app.name, score - usage_boost, usage_boost, score));
+                    
                     Some((app, score))
                 } else {
                     None
@@ -194,7 +203,7 @@ pub fn spawn_app_search(query: String, tx: tokio_mpsc::Sender<AsyncResult>) {
             })
             .collect();
         
-        // Sort by score (highest first), then by name
+        // Sort by final score (highest first), then by name for tie-breaking
         matches.sort_by(|a, b| {
             b.1.cmp(&a.1).then_with(|| a.0.name.cmp(&b.0.name))
         });

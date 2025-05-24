@@ -1,0 +1,57 @@
+{
+  "todo": [
+    {
+      "assignedTo": {
+        "name": "Chris J"
+      },
+      "creation_time": "2025-05-24T05:14:50.036Z",
+      "id": "3",
+      "references": [],
+      "title": "config as code theming / rofi drop in"
+    },
+    {
+      "assignedTo": {
+        "name": "Chris J"
+      },
+      "creation_time": "2025-05-24T05:14:08.157Z",
+      "id": "1",
+      "references": [],
+      "title": "Mayb refactor?"
+    },
+    {
+      "assignedTo": {
+        "name": "Chris J"
+      },
+      "creation_time": "2025-05-24T05:14:26.474Z",
+      "id": "2",
+      "references": [],
+      "title": "Nicer app icon / button"
+    },
+    {
+      "assignedTo": {
+        "name": "Chris J"
+      },
+      "creation_time": "2025-05-24T05:15:43.814Z",
+      "id": "5",
+      "references": [],
+      "title": "Smarter AI?"
+    }
+  ],
+  "in-progress": [
+    {
+      "assignedTo": {
+        "name": "Chris J"
+      },
+      "creation_time": "2025-05-24T05:15:11.578Z",
+      "description": {
+        "content": "- Weather\n- Stocks\n- Sports",
+        "mime": "text/markdown"
+      },
+      "id": "4",
+      "references": [],
+      "title": "Ez service configuration"
+    }
+  ],
+  "testing": [],
+  "done": []
+}

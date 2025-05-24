@@ -77,6 +77,7 @@ pub fn generate_id(prefix: &str, content: &str) -> String {
 }
 
 pub fn truncate_text(text: &str, max_length: usize) -> String {
+    let text: &str = text.trim();
     if text.len() <= max_length {
         text.to_string()
     } else {
@@ -192,6 +193,6 @@ mod tests {
     fn test_truncate_text() {
         assert_eq!(truncate_text("short", 10), "short");
         assert_eq!(truncate_text("this is a very long text", 10), "this is...");
-        assert_eq!(truncate_text("exactly ten", 10), "exactly te...");
+        assert_eq!(truncate_text("12345678901", 10), "1234567...");
     }
 }

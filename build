@@ -8,6 +8,12 @@ echo "📦 Installing binaries..."
 mv target/release/wayfindr ~/cmds/wayfindr-bin
 cp launch/wayfindr ~/cmds/wayfindr
 
+echo "🧪 Running tests..."
+if ! cargo test --release; then
+    echo "❌ Tests failed. Aborting build process."
+    exit 1
+fi
+
 
 echo "🔑 Checking environment variables..."
 if [ -f ".env" ]; then

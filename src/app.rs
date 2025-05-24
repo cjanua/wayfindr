@@ -8,7 +8,7 @@ use crate::{
     config::get_config,
     providers::ProviderManager,
     services::{execution::ExecutionService, usage},
-    types::{ActionResult, AppResult, SearchMessage},
+    types::{ActionResult, AppResult, SearchMessage}, utils,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,25 +68,61 @@ impl App {
 
     // Update the load_initial_results method to show actual top used apps
     async fn load_initial_results(&mut self) {
-        let top_used = usage::get_top_used(5);
-        if !top_used.is_empty() {
-            // Get the actual app names and try to find them in the applications provider
-            let mut initial_results = Vec::new();
+        utils::log_info("Loading initial top apps...");
 
-            for app_id in top_used {
-                // Try to reconstruct ActionResult from usage data
-                // This is a simplified approach - you might want to cache app data
-                if let Some(result) = self.get_app_by_id(&app_id).await {
-                    initial_results.push(result);
+        // Use the applications provider to get top used apps
+        let apps_provider = self.provider_manager.get_provider("applications");
+        if let Some(provider) = apps_provider {
+            match provider.search("").await {  // Empty query triggers top apps
+                Ok(scored_results) => {
+                    if !scored_results.is_empty() {
+                        self.results = scored_results.into_iter()
+                            .map(|sr| sr.result)
+                            .collect();
+                        utils::log_info(&format!("Loaded {} top apps", self.results.len()));
+                    } else {
+                        utils::log_info("No top apps found, loading fallback apps");
+                        self.load_fallback_apps().await;
+                    }
+                }
+                Err(e) => {
+                    utils::log_error(&format!("Failed to load top apps: {}", e));
+                    self.load_fallback_apps().await;
                 }
             }
-
-            self.results = initial_results;
-            self.selected_index = 0;
         } else {
-            // If no usage data, show some default apps or empty
-            self.results = Vec::new();
+            utils::log_error("Applications provider not found");
+            self.load_fallback_apps().await;
         }
+        
+        self.selected_index = 0;
+    }
+
+    async fn load_fallback_apps(&mut self) {
+        utils::log_info("Loading fallback common apps...");
+        
+        // Create some common fallback apps if no usage data exists
+        let common_apps = vec![
+            ("firefox", "Firefox Web Browser", "firefox", false),
+            ("code", "Visual Studio Code", "code", false),
+            ("kitty", "Kitty Terminal", "kitty", true),
+            ("nautilus", "Files", "nautilus", false),
+            ("spotify", "Spotify", "spotify", false),
+        ];
+        
+        self.results = common_apps.into_iter()
+            .map(|(name, title, command, terminal)| {
+                ActionResult::new_launch(
+                    utils::generate_id("app", name),
+                    "applications",
+                    title.to_string(),
+                    command.to_string(),
+                    terminal,
+                )
+            })
+            .collect();
+            
+        utils::log_info(&format!("Loaded {} fallback apps", self.results.len()));
     }
 
     // Add helper method to check if query is AI-related
@@ -125,9 +161,6 @@ impl App {
         search_tx: mpsc::Sender<SearchMessage>,
         mut search_rx: mpsc::Receiver<SearchMessage>,
     ) -> AppResult<()> {
-        // Load initial results (top used apps) instead of empty search
-        self.load_initial_results().await;
-
         loop {
             if self.should_exit {
                 break;
@@ -189,12 +222,21 @@ impl App {
                 if self.focus == FocusState::Input {
                     self.input.push(c);
                     self.history_index = None;
-
-                    // Only trigger live search for NON-AI queries
-                    if get_config().search.enable_live_search && !self.is_ai_query(&self.input) {
-                        let input = self.input.clone();
-                        self.perform_search(&input, search_tx).await;
+                    match self.is_ai_query(&self.input) {
+                        true => {
+                            // AI query - show loading state
+                            self.is_loading = true;
+                            self.error_message = None;
+                        }
+                        false => {
+                            // Only trigger live search for NON-AI queries
+                            if get_config().search.enable_live_search {
+                                let input = self.input.clone();
+                                self.perform_search(&input, search_tx).await;
+                            }
+                        }
                     }
+                    
                 }
             }
 
@@ -203,13 +245,14 @@ impl App {
                     self.input.pop();
                     self.history_index = None;
 
-                    // Only trigger live search for NON-AI queries
-                    if get_config().search.enable_live_search && !self.is_ai_query(&self.input) {
+                    if self.input.is_empty() {
+                        // When input becomes empty, show top apps again
+                        self.clear_search_state();
+                        self.load_initial_results().await;
+                    } else if get_config().search.enable_live_search && !self.is_ai_query(&self.input) {
+                        // Only trigger live search for NON-AI queries
                         let input = self.input.clone();
                         self.perform_search(&input, search_tx).await;
-                    } else if self.input.is_empty() {
-                        // Show top apps when input becomes empty
-                        self.load_initial_results().await;
                     }
                 }
             }
@@ -218,6 +261,13 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn clear_search_state(&mut self) {
+        self.is_loading = false;
+        self.error_message = None;
+        self.results.clear();
+        self.selected_index = 0;
     }
 
     async fn handle_input_enter(

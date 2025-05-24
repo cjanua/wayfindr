@@ -158,10 +158,10 @@ impl SearchProvider for ApplicationProvider {
 
     fn can_handle(&self, query: &str) -> bool {
         // Handle direct app: prefix or empty query (for top apps)
-        query.is_empty()
-            || query.starts_with("app:")
-            || query.starts_with("apps")
-            || (!query.starts_with("ai:") && !query.starts_with("ask:")) // Handle general queries unless they're AI queries
+        query.is_empty() ||
+        query.starts_with("app:") ||
+        query.starts_with("apps") ||
+        (!query.starts_with("ai:") && !query.starts_with("ask:")) // Handle general queries unless they're AI queries
     }
 
     fn priority(&self) -> u8 {
@@ -169,6 +169,8 @@ impl SearchProvider for ApplicationProvider {
     }
 
     async fn search(&self, query: &str) -> ProviderResult<Vec<ScoredResult>> {
+        utils::log_info(&format!("ApplicationProvider::search called with query: '{}'", query));
+
         // Ensure apps are loaded
         let mut provider = self.clone();
         provider.scan_desktop_files()?;
@@ -184,20 +186,26 @@ impl SearchProvider for ApplicationProvider {
         let mut matches = Vec::new();
 
         for app in &provider.apps {
+            let app_id = utils::generate_id("app", &app.name);
+            
             let score = if processed_query.is_empty() {
-                // Empty query - show ONLY top used apps (minimum 1 use)
-                let usage_count = usage::get_usage_boost(&utils::generate_id("app", &app.name));
+                // Empty query - check for usage data
+                let usage_count = usage::get_usage_count(&app_id);
+                let usage_boost = usage::get_usage_boost(&app_id);
+                
+                utils::log_debug(&format!("App '{}': usage_count={}, usage_boost={}", 
+                    app.name, usage_count, usage_boost));
+                
                 if usage_count > 0 {
-                    // Use actual usage count as base score for ranking
-                    let actual_usage =
-                        usage::get_usage_count(&utils::generate_id("app", &app.name));
-                    utils::log_info(&format!(
-                        "Empty query - {} has {} uses, boost: {}",
-                        app.name, actual_usage, usage_count
-                    ));
-                    usage_count
-                } else {
-                    continue; // Skip unused apps for empty query
+                    usage_boost
+                } 
+                else {
+                    // If no apps have usage data, show some popular ones
+                    if matches.len() < 5 && is_common_app(&app.name) {
+                        20 // Give common apps a base score
+                    } else {
+                        continue;
+                    }
                 }
             } else {
                 // Calculate relevance score for non-empty queries
@@ -207,30 +215,27 @@ impl SearchProvider for ApplicationProvider {
                     app.comment.as_deref().unwrap_or(""),
                     &app.categories,
                 );
-
+                
                 if base_score > 0 {
-                    let usage_boost = usage::get_usage_boost(&utils::generate_id("app", &app.name));
+                    let usage_boost = usage::get_usage_boost(&app_id);
                     base_score + usage_boost
                 } else {
                     continue;
                 }
             };
 
-            let action_id = utils::generate_id("app", &app.name);
             let result = ActionResult {
-                id: action_id,
+                id: app_id,
                 provider: self.id().to_string(),
-                action: ActionType::Launch {
-                    needs_terminal: app.terminal,
-                },
+                action: ActionType::Launch { needs_terminal: app.terminal },
                 title: app.name.clone(),
-                description: app.comment.clone().unwrap_or_default(),
+                description: app.comment.clone().unwrap_or_else(|| format!("Launch {}", app.name)),
                 data: ActionData::Command(app.clean_exec_command()),
                 metadata: ActionMetadata {
                     icon: app.icon.clone(),
                     category: app.categories.first().cloned(),
                     tags: app.categories.clone(),
-                    usage_count: 0, // Will be populated by usage service
+                    usage_count: 0,
                     last_used: None,
                 },
             };
@@ -240,17 +245,21 @@ impl SearchProvider for ApplicationProvider {
 
         // Sort by score and limit results
         matches.sort_by(|a, b| b.score.cmp(&a.score));
-
+        
         if processed_query.is_empty() {
-            // For empty query, strictly limit to top 5 most used
+            // For empty query, limit to top 5
             matches.truncate(5);
-            utils::log_info(&format!(
-                "Empty query - showing top {} most-used apps",
-                matches.len()
-            ));
+            utils::log_info(&format!("Empty query - returning {} top apps", matches.len()));
+            
+            // If we still have no matches, force some common apps
+            if matches.is_empty() {
+                utils::log_info("No apps with usage data found, creating fallback apps");
+                return Ok(create_fallback_apps());
+            }
         } else {
             // Normal limit for search queries
             matches.truncate(20);
+            utils::log_info(&format!("Search query '{}' - returning {} matches", processed_query, matches.len()));
         }
 
         Ok(matches)
@@ -273,4 +282,47 @@ impl Default for ApplicationProvider {
     fn default() -> Self {
         Self::new()
     }
+}
+
+
+// Helper function to identify common apps
+fn is_common_app(app_name: &str) -> bool {
+    let common_apps = [
+        "firefox", "chromium", "google-chrome", "chrome",
+        "code", "visual-studio-code", "vscode",
+        "kitty", "alacritty", "gnome-terminal", "konsole", "xterm",
+        "nautilus", "thunar", "dolphin", "pcmanfm",
+        "spotify", "vlc", "gimp", "libreoffice",
+        "discord", "slack", "telegram", "whatsapp",
+        "gedit", "vim", "emacs", "sublime-text",
+    ];
+    
+    let app_lower = app_name.to_lowercase();
+    common_apps.iter().any(|&common| app_lower.contains(common))
+}
+
+// Create fallback apps when no real apps are found
+fn create_fallback_apps() -> Vec<ScoredResult> {
+    let fallback_apps = vec![
+        ("Firefox", "firefox", "Web Browser", false),
+        ("Terminal", "kitty", "Terminal Emulator", true),
+        ("Files", "nautilus", "File Manager", false),
+        ("Text Editor", "gedit", "Text Editor", false),
+        ("Calculator", "gnome-calculator", "Calculator", false),
+    ];
+    
+    fallback_apps.into_iter()
+        .enumerate()
+        .map(|(i, (title, command, description, terminal))| {
+            let result = ActionResult::new_launch(
+                utils::generate_id("fallback", command),
+                "applications",
+                title.to_string(),
+                command.to_string(),
+                terminal,
+            ).with_description(description.to_string());
+            
+            ScoredResult::new(result, 100 - i as i32, "applications".to_string())
+        })
+        .collect()
 }

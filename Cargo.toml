@@ -45,5 +45,5 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
-[lints.rust]
-dead_code = "allow"
+# [lints.rust]
+# dead_code = "allow"

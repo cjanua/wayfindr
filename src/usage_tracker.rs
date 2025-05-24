@@ -1,5 +1,4 @@
 // src/usage_tracker.rs
-#![allow(unused)]
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};

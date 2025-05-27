@@ -1,6 +1,7 @@
 // src/services/execution.rs
 use crate::{
     config::get_config,
+    services::usage,
     types::{ActionData, ActionResult, ActionType, AppResult},
     utils,
 };
@@ -19,6 +20,9 @@ impl ExecutionService {
             "Executing action: {} ({})",
             action.title, action.id
         ));
+
+        usage::record_usage(&action.id);
+        utils::log_debug(&format!("Recorded usage for action: {}", action.id));
 
         match &action.action {
             ActionType::Launch { needs_terminal } => {

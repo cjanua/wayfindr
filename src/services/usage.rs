@@ -1,4 +1,5 @@
 // src/services/usage.rs
+
 use crate::config;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -53,6 +54,7 @@ impl UsageService {
 
     fn load(&mut self) -> Result<()> {
         if !self.file_path.exists() {
+            crate::utils::log_info(&format!("Usage stats file doesn't exist yet: {}", self.file_path.display()));
             return Ok(());
         }
 
@@ -82,6 +84,7 @@ impl UsageService {
             }
         }
 
+        crate::utils::log_info(&format!("Loaded {} usage entries from {}", self.entries.len(), self.file_path.display()));
         Ok(())
     }
 
@@ -116,7 +119,11 @@ impl UsageService {
             writeln!(file, "{}|{}", key, json_data)?;
         }
 
+        // Ensure data is written to disk
+        file.flush().context("Failed to flush usage stats file")?;
+        
         self.dirty = false;
+        crate::utils::log_debug(&format!("Saved {} usage entries to {}", self.entries.len(), self.file_path.display()));
         Ok(())
     }
 
@@ -129,6 +136,16 @@ impl UsageService {
             }
         }
         self.dirty = true;
+        
+        // Force immediate save to ensure usage is persisted
+        if let Err(e) = self.save() {
+            crate::utils::log_error(&format!("Failed to save usage stats immediately: {}", e));
+        }
+        
+        crate::utils::log_info(&format!("Recorded usage for '{}' (total: {})", 
+            action_id, 
+            self.entries.get(action_id).map(|e| e.count).unwrap_or(0)
+        ));
     }
 
     pub fn get_usage_count(&self, action_id: &str) -> u32 {
@@ -226,7 +243,11 @@ pub fn record_usage(action_id: &str) {
     if let Some(service) = USAGE_SERVICE.get() {
         if let Ok(mut service) = service.lock() {
             service.record_usage(action_id);
+        } else {
+            crate::utils::log_error("Failed to acquire lock on usage service for recording");
         }
+    } else {
+        crate::utils::log_error("Usage service not initialized");
     }
 }
 

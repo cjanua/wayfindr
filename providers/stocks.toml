@@ -1,0 +1,46 @@
+[provider]
+id = "stocks"
+name = "Stock Market"
+priority = 55
+enabled = true
+
+[triggers]
+prefixes = ["stock:", "ticker:", "$"]
+patterns = [
+    "stock",
+    "price",
+    "market",
+    "dow",
+    "nasdaq",
+    "s&p"
+]
+
+[api]
+type = "rest"
+base_url = "https://query1.finance.yahoo.com/v8/finance"
+# Yahoo Finance doesn't require API key for basic queries
+
+[[commands]]
+id = "quote"
+name = "Stock Quote"
+endpoint = "/quote"
+method = "GET"
+response_template = """
+📈 {{quoteResponse.result.0.symbol}} - {{quoteResponse.result.0.longName}}
+Price: ${{quoteResponse.result.0.regularMarketPrice}} 
+Change: {{quoteResponse.result.0.regularMarketChange}} ({{quoteResponse.result.0.regularMarketChangePercent}}%)
+Day Range: ${{quoteResponse.result.0.regularMarketDayLow}} - ${{quoteResponse.result.0.regularMarketDayHigh}}
+"""
+
+[commands.params]
+symbols = "{{query}}"
+
+[[matchers]]
+pattern = "^\\$([A-Z]+)$"
+command = "quote"
+query_group = 1
+
+[[matchers]]
+pattern = "^stock ([A-Z]+)$"
+command = "quote"
+query_group = 1

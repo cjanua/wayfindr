@@ -1,14 +1,34 @@
 // src/cli.rs
 use crate::utils::DEFAULT_LOG_FILE_PATH;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-// use crate::process_execution; // For launching alacritty
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct CliArgs {
     #[arg(long, value_name = "FILE_PATH", num_args = 0..=1, value_hint = clap::ValueHint::FilePath)]
     pub logs: Option<Option<PathBuf>>,
+    
+    #[command(subcommand)]
+    pub provider: Option<ProviderCommands>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProviderCommands {
+    /// List all providers
+    List,
+    /// Enable a provider
+    Enable { name: String },
+    /// Disable a provider
+    Disable { name: String },
+    /// Show provider configuration
+    Show { name: String },
+    /// Create new provider from template
+    Create { name: String },
+    /// Test provider with query
+    Test { name: String, query: String },
+    /// Install default provider configurations
+    InstallDefaults,
 }
 
 /// Handles CLI arguments.
@@ -17,6 +37,7 @@ pub struct CliArgs {
 pub fn handle_cli_args() -> Result<bool, anyhow::Error> {
     let cli_args = CliArgs::parse();
 
+    // Handle --logs
     if let Some(option_for_path_or_default_signal) = cli_args.logs {
         let log_file_to_view: PathBuf = match option_for_path_or_default_signal {
             Some(specific_path) => specific_path,
@@ -36,6 +57,12 @@ pub fn handle_cli_args() -> Result<bool, anyhow::Error> {
             content.lines().for_each(|line| eprintln!("{}", line));
         }
         return Ok(true); // Exit after handling --logs
+    }
+    
+    // Handle --provider subcommands
+    if let Some(provider_cmd) = cli_args.provider {
+        crate::providers::management::handle_provider_command(provider_cmd)?;
+        return Ok(true); // Exit after handling provider command
     }
 
     Ok(false) // Continue to TUI

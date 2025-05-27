@@ -5,6 +5,8 @@ use async_trait::async_trait;
 pub mod ai;
 pub mod applications;
 pub mod directories;
+pub mod dynamic;
+pub mod management;
 
 #[async_trait]
 pub trait SearchProvider: Send + Sync {
@@ -115,11 +117,23 @@ impl ProviderManager {
 impl Default for ProviderManager {
     fn default() -> Self {
         let mut manager = Self::new();
+        let config = crate::config::get_config();
 
-        // Register default providers
+        // Register built-in providers
         manager.register(applications::ApplicationProvider::new());
         manager.register(directories::DirectoryProvider::new());
         manager.register(ai::AiProvider::new());
+
+        // Load and register dynamic providers
+        let dynamic_providers = dynamic::load_dynamic_providers(&config.paths.config_dir);
+        for provider in dynamic_providers {
+            manager.providers.push(provider);
+        }
+
+        crate::utils::log_info(&format!(
+            "Loaded {} providers total", 
+            manager.providers.len()
+        ));
 
         manager
     }

@@ -1,0 +1,49 @@
+# ~/.wayfindr/providers/sports.toml
+[provider]
+id = "sports"
+name = "Sports Provider"
+priority = 55
+enabled = true
+
+[triggers]
+prefixes = ["sports:", "nba:", "nfl:"]
+patterns = [
+    "games tonight",
+    "scores",
+    "nba",
+    "nfl",
+    "mlb",
+    "soccer"
+]
+
+[api]
+type = "rest"
+base_url = "https://api.thesportsdb.com/v1/json/3"
+# No API key needed for basic access
+
+[[commands]]
+id = "nba_today"
+name = "NBA Games Today"
+endpoint = "/eventsday.php"
+method = "GET"
+response_template = """
+🏀 NBA Games Today:
+{{#if events}}
+{{#each events}}
+  {{strTime}} - {{strEvent}}
+  {{strHomeTeam}} vs {{strAwayTeam}}
+  {{#if intHomeScore}}Score: {{intHomeScore}} - {{intAwayScore}}{{/if}}
+{{/each}}
+{{else}}
+No NBA games today
+{{/if}}
+"""
+
+[commands.params]
+d = "{{date}}"
+s = "Basketball"
+l = "NBA"
+
+[[matchers]]
+pattern = "^(?:nba|basketball)(?: games)?(?: tonight| today)?$"
+command = "nba_today"

@@ -1,0 +1,78 @@
+# ~/.wayfindr/providers/weather.toml
+[provider]
+id = "weather"
+name = "Weather Provider"
+priority = 60
+enabled = true
+
+# Patterns that trigger this provider
+[triggers]
+prefixes = ["weather:", "w:"]
+patterns = [
+    "weather",
+    "weather in",
+    "temperature",
+    "forecast",
+    "rain",
+    "snow"
+]
+
+# API configuration
+[api]
+type = "rest"
+base_url = "https://api.openweathermap.org/data/2.5"
+api_key_env = "OPENWEATHER_API_KEY"
+
+# Available commands
+[[commands]]
+id = "current"
+name = "Current Weather"
+endpoint = "/weather"
+method = "GET"
+response_template = """
+🌡️ Weather in {{name}}: {{weather.0.description}}
+Temperature: {{main.temp}}°C (feels like {{main.feels_like}}°C)
+Humidity: {{main.humidity}}%
+Wind: {{wind.speed}} m/s
+"""
+
+# Parameters as a table section
+[commands.params]
+q = "{{query|location}}"
+appid = "{{api_key}}"
+units = "metric"
+
+[[commands]]
+id = "forecast"
+name = "Weather Forecast"
+endpoint = "/forecast"
+method = "GET"
+response_template = """
+📅 24h Forecast for {{city.name}}:
+{{#each list}}
+  {{dt_txt}}: {{main.temp}}°C - {{weather.0.description}}
+{{/each}}
+"""
+
+[commands.params]
+q = "{{query|location}}"
+appid = "{{api_key}}"
+units = "metric"
+cnt = "8"
+
+# Query matching rules
+[[matchers]]
+pattern = "^weather$"
+command = "current"
+use_location = true
+
+[[matchers]]
+pattern = "^weather in (.+)$"
+command = "current"
+query_group = 1
+
+[[matchers]]
+pattern = "^forecast(?: (?:in|for) (.+))?$"
+command = "forecast"
+query_group = 1
+use_location = true

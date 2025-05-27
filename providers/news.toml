@@ -1,0 +1,144 @@
+# ~/.wayfindr/providers/news.toml
+# Example of a comprehensive provider configuration
+
+[provider]
+id = "news"
+name = "News Headlines"
+priority = 55
+enabled = true
+
+[triggers]
+# Prefixes that directly trigger this provider
+prefixes = ["news:", "headlines:", "n:"]
+
+# Patterns anywhere in the query that suggest this provider
+patterns = [
+    "news",
+    "headlines", 
+    "breaking",
+    "latest news",
+    "today's news"
+]
+
+[api]
+type = "rest"
+base_url = "https://newsapi.org/v2"
+api_key_env = "NEWS_API_KEY"
+
+# Optional: Add custom headers
+[api.headers]
+"User-Agent" = "wayfindr-news/1.0"
+"Accept" = "application/json"
+
+# Define multiple commands for different types of searches
+[[commands]]
+id = "top_headlines"
+name = "Top Headlines"
+endpoint = "/top-headlines"
+method = "GET"
+params = { 
+    apiKey = "{{api_key}}", 
+    country = "us",
+    pageSize = "5"
+}
+response_template = """
+📰 Top Headlines:
+{{#each articles}}
+  {{@index}}. {{title}}
+     {{source.name}} - {{publishedAt}}
+     {{description}}
+{{/each}}
+"""
+
+[[commands]]
+id = "search_news"
+name = "Search News"
+endpoint = "/everything"
+method = "GET"
+params = {
+    apiKey = "{{api_key}}",
+    q = "{{query}}",
+    sortBy = "relevancy",
+    pageSize = "5",
+    language = "en"
+}
+response_template = """
+📰 News about '{{query}}':
+{{#if articles}}
+{{#each articles}}
+  • {{title}} ({{source.name}})
+    {{description}}
+{{/each}}
+{{else}}
+No news found for '{{query}}'
+{{/if}}
+"""
+
+[[commands]]
+id = "category_news"
+name = "News by Category"
+endpoint = "/top-headlines"
+method = "GET"
+params = {
+    apiKey = "{{api_key}}",
+    category = "{{query}}",
+    country = "us",
+    pageSize = "5"
+}
+response_template = """
+📰 {{query}} News:
+{{#each articles}}
+  • {{title}}
+    {{#if author}}By {{author}} - {{/if}}{{source.name}}
+{{/each}}
+"""
+
+# Matchers determine which command to use based on query patterns
+[[matchers]]
+# Just "news" or "headlines" - show top headlines
+pattern = "^(news|headlines)$"
+command = "top_headlines"
+
+[[matchers]]
+# "news about X" or "news on X"
+pattern = "^news (?:about|on) (.+)$"
+command = "search_news"
+query_group = 1
+
+[[matchers]]
+# Category news: "tech news", "sports news", etc.
+pattern = "^(business|entertainment|general|health|science|sports|technology) news$"
+command = "category_news"
+query_group = 1
+
+[[matchers]]
+# Search with prefix
+pattern = "^search (.+)$"
+command = "search_news"
+query_group = 1
+
+[[matchers]]
+# Default: any other query gets searched
+pattern = "^(.+)$"
+command = "search_news"
+query_group = 1
+
+# Advanced example with POST request
+[[commands]]
+id = "analyze_sentiment"
+name = "Analyze News Sentiment"
+endpoint = "/analyze"
+method = "POST"
+# For POST requests, you can define a body
+[commands.body]
+text = "{{query}}"
+language = "en"
+
+# The response template can use Handlebars helpers
+response_template = """
+Sentiment Analysis:
+{{#if positive}}✅ Positive{{/if}}
+{{#if negative}}❌ Negative{{/if}}
+{{#if neutral}}➖ Neutral{{/if}}
+Score: {{score}}
+"""

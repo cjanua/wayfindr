@@ -8,6 +8,10 @@ echo "📦 Installing binaries..."
 mv target/release/wayfindr ~/cmds/wayfindr-bin
 cp launch/wayfindr ~/cmds/wayfindr
 
+cp -r providers/ ~/.wayfindr/
+rm ~/.wayfindr/wayfindr.log
+touch ~/.wayfindr/wayfindr.log
+
 echo "🧪 Running tests..."
 if ! cargo test --release; then
     echo "❌ Tests failed. Aborting build process."

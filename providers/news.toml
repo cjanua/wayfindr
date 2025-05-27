@@ -1,5 +1,5 @@
 # ~/.wayfindr/providers/news.toml
-# Example of a comprehensive provider configuration
+# Fixed version with proper response_template for all commands
 
 [provider]
 id = "news"
@@ -36,11 +36,6 @@ id = "top_headlines"
 name = "Top Headlines"
 endpoint = "/top-headlines"
 method = "GET"
-params = { 
-    apiKey = "{{api_key}}", 
-    country = "us",
-    pageSize = "5"
-}
 response_template = """
 📰 Top Headlines:
 {{#each articles}}
@@ -50,18 +45,16 @@ response_template = """
 {{/each}}
 """
 
+[commands.params]
+apiKey = "{{api_key}}"
+country = "us"
+pageSize = "5"
+
 [[commands]]
 id = "search_news"
 name = "Search News"
 endpoint = "/everything"
 method = "GET"
-params = {
-    apiKey = "{{api_key}}",
-    q = "{{query}}",
-    sortBy = "relevancy",
-    pageSize = "5",
-    language = "en"
-}
 response_template = """
 📰 News about '{{query}}':
 {{#if articles}}
@@ -74,17 +67,18 @@ No news found for '{{query}}'
 {{/if}}
 """
 
+[commands.params]
+apiKey = "{{api_key}}"
+q = "{{query}}"
+sortBy = "relevancy"
+pageSize = "5"
+language = "en"
+
 [[commands]]
 id = "category_news"
 name = "News by Category"
 endpoint = "/top-headlines"
 method = "GET"
-params = {
-    apiKey = "{{api_key}}",
-    category = "{{query}}",
-    country = "us",
-    pageSize = "5"
-}
 response_template = """
 📰 {{query}} News:
 {{#each articles}}
@@ -92,6 +86,12 @@ response_template = """
     {{#if author}}By {{author}} - {{/if}}{{source.name}}
 {{/each}}
 """
+
+[commands.params]
+apiKey = "{{api_key}}"
+category = "{{query}}"
+country = "us"
+pageSize = "5"
 
 # Matchers determine which command to use based on query patterns
 [[matchers]]
@@ -122,23 +122,3 @@ query_group = 1
 pattern = "^(.+)$"
 command = "search_news"
 query_group = 1
-
-# Advanced example with POST request
-[[commands]]
-id = "analyze_sentiment"
-name = "Analyze News Sentiment"
-endpoint = "/analyze"
-method = "POST"
-# For POST requests, you can define a body
-[commands.body]
-text = "{{query}}"
-language = "en"
-
-# The response template can use Handlebars helpers
-response_template = """
-Sentiment Analysis:
-{{#if positive}}✅ Positive{{/if}}
-{{#if negative}}❌ Negative{{/if}}
-{{#if neutral}}➖ Neutral{{/if}}
-Score: {{score}}
-"""

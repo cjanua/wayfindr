@@ -41,7 +41,11 @@ pub fn handle_cli_args() -> Result<bool, anyhow::Error> {
     if let Some(option_for_path_or_default_signal) = cli_args.logs {
         let log_file_to_view: PathBuf = match option_for_path_or_default_signal {
             Some(specific_path) => specific_path,
-            None => PathBuf::from(DEFAULT_LOG_FILE_PATH),
+            None => {
+                // Use the config system to get the actual log file path
+                let config = crate::config::get_config();
+                config.paths.log_file.clone()
+            }
         };
 
         if !log_file_to_view.exists() {
@@ -62,7 +66,7 @@ pub fn handle_cli_args() -> Result<bool, anyhow::Error> {
     // Handle --provider subcommands
     if let Some(provider_cmd) = cli_args.provider {
         crate::providers::management::handle_provider_command(provider_cmd)?;
-        return Ok(true); // Exit after handling provider command
+        return Ok(true); 
     }
 
     Ok(false) // Continue to TUI

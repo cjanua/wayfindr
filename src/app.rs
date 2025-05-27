@@ -1,14 +1,12 @@
-// src/app.rs
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
-use ratatui::{backend::CrosstermBackend, Terminal};
-use std::time::Duration;
-use tokio::sync::mpsc;
+use crossterm::event::{KeyCode, KeyEvent};
 
+// src/app.rs - Updated to be interface-agnostic
 use crate::{
     config::get_config,
     providers::ProviderManager,
     services::{execution::ExecutionService, usage},
-    types::{ActionResult, AppResult, SearchMessage}, utils,
+    types::{ActionResult, AppResult, SearchMessage}, 
+    utils,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,8 +29,8 @@ pub struct App {
     pub history_index: Option<usize>,
 
     // Services
-    provider_manager: ProviderManager,
-    execution_service: ExecutionService,
+    pub provider_manager: ProviderManager,
+    pub execution_service: ExecutionService,
 
     // Control
     should_exit: bool,
@@ -66,8 +64,8 @@ impl App {
         Ok(app)
     }
 
-    // Update the load_initial_results method to show actual top used apps
-    async fn load_initial_results(&mut self) {
+    // Make this public so other interfaces can use it
+    pub async fn load_initial_results(&mut self) {
         utils::log_info("Loading initial top apps...");
 
         // Use the applications provider to get top used apps
@@ -125,42 +123,38 @@ impl App {
         utils::log_info(&format!("Loaded {} fallback apps", self.results.len()));
     }
 
-    // Add helper method to check if query is AI-related
+    // Public method for other interfaces to perform searches
+    pub async fn search(&mut self, query: &str) -> Vec<ActionResult> {
+        let scored_results = self.provider_manager.search_all(query).await;
+        scored_results.into_iter().map(|sr| sr.result).collect()
+    }
+
+    // Helper method to check if query is AI-related
     fn is_ai_query(&self, query: &str) -> bool {
         let config = get_config();
         query.starts_with(&config.search.ai_prefix) || query.starts_with("ask:")
     }
 
-    // Helper method to get app by ID (simplified - you might want to improve this)
-    async fn get_app_by_id(&self, app_id: &str) -> Option<ActionResult> {
-        // This is a simplified implementation
-        // You might want to cache application data or query the provider directly
-
-        // Extract app name from ID (assuming format like "app_<hash>")
-        if app_id.starts_with("app_") {
-            // For now, create a simple launch action
-            // In a real implementation, you'd want to store more app metadata
-            let app_name = app_id.strip_prefix("app_").unwrap_or(app_id);
-
-            Some(ActionResult::new_launch(
-                app_id.to_string(),
-                "applications",
-                format!("App: {}", app_name),
-                app_name.to_string(),
-                false,
-            ))
-        } else {
-            None
-        }
+    // Public getter for should_exit
+    pub fn should_exit(&self) -> bool {
+        self.should_exit
     }
 
-    // Update the run method to load initial results right after starting
+    // Public setter for should_exit
+    pub fn set_should_exit(&mut self, should_exit: bool) {
+        self.should_exit = should_exit;
+    }
+
+    // TUI-specific run method (kept for TUI interface)
     pub async fn run(
         &mut self,
-        terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
-        search_tx: mpsc::Sender<SearchMessage>,
-        mut search_rx: mpsc::Receiver<SearchMessage>,
+        terminal: &mut ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>,
+        search_tx: tokio::sync::mpsc::Sender<SearchMessage>,
+        mut search_rx: tokio::sync::mpsc::Receiver<SearchMessage>,
     ) -> AppResult<()> {
+        use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+        use std::time::Duration;
+
         loop {
             if self.should_exit {
                 break;
@@ -190,7 +184,7 @@ impl App {
     async fn handle_key_event(
         &mut self,
         event: KeyEvent,
-        search_tx: &mpsc::Sender<SearchMessage>,
+        search_tx: &tokio::sync::mpsc::Sender<SearchMessage>,
     ) -> AppResult<()> {
         match event.code {
             KeyCode::Esc => self.should_exit = true,
@@ -272,7 +266,7 @@ impl App {
 
     async fn handle_input_enter(
         &mut self,
-        search_tx: &mpsc::Sender<SearchMessage>,
+        search_tx: &tokio::sync::mpsc::Sender<SearchMessage>,
     ) -> AppResult<()> {
         let query = self.input.trim().to_string();
 
@@ -323,7 +317,7 @@ impl App {
         Ok(())
     }
 
-    async fn perform_search(&mut self, query: &str, search_tx: &mpsc::Sender<SearchMessage>) {
+    async fn perform_search(&mut self, query: &str, search_tx: &tokio::sync::mpsc::Sender<SearchMessage>) {
         self.is_loading = true;
         self.error_message = None;
 

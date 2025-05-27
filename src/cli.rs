@@ -1,4 +1,4 @@
-// src/cli.rs
+// src/cli.rs - Updated with interface selection
 use crate::utils::DEFAULT_LOG_FILE_PATH;
 use clap::{Parser, Subcommand};
 use std::{collections::HashMap, path::{Path, PathBuf}};
@@ -8,9 +8,17 @@ use std::{collections::HashMap, path::{Path, PathBuf}};
 pub struct CliArgs {
     #[arg(long, value_name = "FILE_PATH", num_args = 0..=1, value_hint = clap::ValueHint::FilePath)]
     pub logs: Option<Option<PathBuf>>,
-
+    
     #[arg(long, value_name = "FILE_PATH", num_args = 0..=1, value_hint = clap::ValueHint::FilePath)]
     pub usage: Option<Option<PathBuf>>,
+    
+    /// Use rofi interface instead of TUI
+    #[arg(long)]
+    pub rofi: bool,
+    
+    /// Specify interface type (tui, rofi)
+    #[arg(long, value_name = "TYPE")]
+    pub interface: Option<String>,
     
     #[command(subcommand)]
     pub provider: Option<ProviderCommands>,
@@ -34,10 +42,9 @@ pub enum ProviderCommands {
     InstallDefaults,
 }
 
-/// Handles CLI arguments.
-/// Returns `Ok(true)` if the program should exit early, `Ok(false)` to continue.
-/// Returns `Err` on critical failure.
-pub fn handle_cli_args() -> Result<bool, anyhow::Error> {
+/// Parse CLI arguments and return the interface type to use
+/// Returns `Ok((should_exit, interface_type))` 
+pub fn handle_cli_args() -> Result<(bool, crate::interfaces::InterfaceType), anyhow::Error> {
     let cli_args = CliArgs::parse();
 
     // Handle --logs
@@ -45,7 +52,6 @@ pub fn handle_cli_args() -> Result<bool, anyhow::Error> {
         let log_file_to_view: PathBuf = match option_for_path_or_default_signal {
             Some(specific_path) => specific_path,
             None => {
-                // Use the config system to get the actual log file path
                 let config = crate::config::get_config();
                 config.paths.log_file.clone()
             }
@@ -57,15 +63,16 @@ pub fn handle_cli_args() -> Result<bool, anyhow::Error> {
                 log_file_to_view.display()
             );
             eprintln!("Tip: The application writes logs to this file when actions are performed or if it's run without the --logs flag.");
-            return Ok(true); // Exit early
+            return Ok((true, crate::interfaces::InterfaceType::Tui)); // Exit early, interface doesn't matter
         }
 
         if let Ok(content) = std::fs::read_to_string(&log_file_to_view) {
             content.lines().for_each(|line| eprintln!("{}", line));
         }
-        return Ok(true); // Exit after handling --logs
+        return Ok((true, crate::interfaces::InterfaceType::Tui)); // Exit after handling --logs
     }
-
+    
+    // Handle --usage
     if let Some(option_for_path_or_default_signal) = cli_args.usage {
         let usage_file_to_view: PathBuf = match option_for_path_or_default_signal {
             Some(specific_path) => specific_path,
@@ -82,20 +89,30 @@ pub fn handle_cli_args() -> Result<bool, anyhow::Error> {
             );
             eprintln!("💡 Tip: Usage statistics are created when you launch applications through wayfindr.");
             eprintln!("   Try launching some apps first, then check back!");
-            return Ok(true); // Exit early
+            return Ok((true, crate::interfaces::InterfaceType::Tui)); // Exit early
         }
 
         display_usage_statistics(&usage_file_to_view)?;
-        return Ok(true); // Exit after handling --usage
+        return Ok((true, crate::interfaces::InterfaceType::Tui)); // Exit after handling --usage
     }
     
     // Handle --provider subcommands
     if let Some(provider_cmd) = cli_args.provider {
         crate::providers::management::handle_provider_command(provider_cmd)?;
-        return Ok(true); 
+        return Ok((true, crate::interfaces::InterfaceType::Tui)); // Exit after handling provider command
     }
 
-    Ok(false) // Continue to TUI
+    // Determine interface type
+    let interface_type = if cli_args.rofi {
+        crate::interfaces::InterfaceType::Rofi
+    } else if let Some(interface_str) = cli_args.interface {
+        interface_str.parse().map_err(|e| anyhow::anyhow!("Invalid interface type: {}", e))?
+    } else {
+        // Default to TUI
+        crate::interfaces::InterfaceType::Tui
+    };
+
+    Ok((false, interface_type)) // Continue to main application
 }
 
 fn display_usage_statistics(usage_file_path: &PathBuf) -> Result<(), anyhow::Error> {
@@ -211,6 +228,7 @@ fn display_usage_statistics(usage_file_path: &PathBuf) -> Result<(), anyhow::Err
     eprintln!("   • Usage boost affects search ranking (shown above)");
     eprintln!("   • Clear stats with: rm '{}'", usage_file_path.display());
     eprintln!("   • View raw data: cat '{}'", usage_file_path.display());
+    eprintln!("   • Try rofi interface: wayfindr --rofi");
     
     Ok(())
 }

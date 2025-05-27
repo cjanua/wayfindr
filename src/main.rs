@@ -1,10 +1,10 @@
-// src/main.rs
+// src/main.rs - Updated with interface selection
 use anyhow::{Context, Result};
-use tokio::sync::mpsc;
 
 mod app;
 mod cli;
 mod config;
+mod interfaces; // New interfaces module
 mod providers;
 mod services;
 mod terminal;
@@ -13,7 +13,7 @@ mod ui;
 mod utils;
 
 use app::App;
-use types::{AppResult, SearchMessage};
+use interfaces::{run_interface, InterfaceType};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,45 +23,41 @@ async fn main() -> Result<()> {
     // Initialize services
     services::usage::init_usage_service().context("Failed to initialize usage service")?;
 
-    // Handle CLI arguments
-    if cli::handle_cli_args()? {
+    // Handle CLI arguments and get interface type
+    let (should_exit_early, interface_type) = cli::handle_cli_args()?;
+    if should_exit_early {
         return Ok(());
     }
 
     // Setup panic handler
     setup_panic_handler();
 
-    // Run the application
-    run_application().await
+    // Run the application with the selected interface
+    run_application(interface_type).await
 }
 
 fn setup_panic_handler() {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
+        // Only restore terminal for TUI interface
         let _ = terminal::restore_terminal();
         original_hook(panic_info);
     }));
 }
 
-async fn run_application() -> Result<()> {
-    // Setup terminal
-    terminal::setup_terminal().context("Failed to setup terminal")?;
+async fn run_application(interface_type: InterfaceType) -> Result<()> {
+    // Create app instance
+    let app = App::new().await?;
 
-    // Create terminal and app
-    let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    let mut app = App::new().await?;
+    // Log which interface is being used
+    match interface_type {
+        InterfaceType::Tui => utils::log_info("Starting wayfindr with TUI interface"),
+        InterfaceType::Rofi => utils::log_info("Starting wayfindr with rofi interface"),
+    }
 
-    // Create message channel for async communication
-    let (search_tx, search_rx) = mpsc::channel::<SearchMessage>(32);
-
-    // Run main loop
-    let result = app.run(&mut terminal, search_tx, search_rx).await;
-
-    // Cleanup
-    terminal::restore_terminal().context("Failed to restore terminal")?;
-
-    result.map_err(|e| anyhow::anyhow!("Application error: {}", e))
+    // Run with the selected interface
+    run_interface(interface_type, app).await
+        .map_err(|e| anyhow::anyhow!("Application error: {}", e))
 }
 
 #[cfg(test)]

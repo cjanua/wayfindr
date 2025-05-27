@@ -58,7 +58,8 @@ impl ExecutionService {
             self.execute_system_command(command).await?;
         }
 
-        Ok(false) // Don't exit after launching applications
+        utils::log_info(&format!("Successfully launched application: {}", action.title));
+        Ok(true) // Exit wayfindr after successfully launching applications
     }
 
     async fn execute_navigate(&self, path: &str) -> AppResult<bool> {

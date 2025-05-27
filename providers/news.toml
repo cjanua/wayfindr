@@ -1,6 +1,4 @@
 # ~/.wayfindr/providers/news.toml
-# Fixed version with proper response_template for all commands
-
 [provider]
 id = "news"
 name = "News Headlines"

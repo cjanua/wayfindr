@@ -72,10 +72,14 @@ impl ProviderManager {
 
     pub async fn search_all(&self, query: &str) -> Vec<ScoredResult> {
         let mut all_results = Vec::new();
+        let mut handled_by_count = 0;
 
         // Get results from all applicable providers
         for provider in &self.providers {
             if provider.can_handle(query) {
+                handled_by_count += 1;
+                crate::utils::log_debug(&format!("Provider '{}' handling query: '{}'", provider.id(), query));
+
                 match provider.search(query).await {
                     Ok(mut results) => {
                         // Apply provider priority boost
@@ -93,8 +97,13 @@ impl ProviderManager {
                         ));
                     }
                 }
+            } else {
+                crate::utils::log_debug(&format!("Provider '{}' skipping query: '{}'", provider.id(), query));
             }
         }
+
+        crate::utils::log_info(&format!("Query '{}' handled by {} providers, got {} total results", 
+            query, handled_by_count, all_results.len()));
 
         // Sort by score (highest first)
         all_results.sort_by(|a, b| b.score.cmp(&a.score));

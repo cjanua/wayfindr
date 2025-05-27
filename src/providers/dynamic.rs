@@ -11,7 +11,7 @@ use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::atomic::{AtomicBool, Ordering}};
 use std::fs;
 use std::path::Path;
 
@@ -71,6 +71,7 @@ pub struct DynamicProvider {
     regex_matchers: Vec<(Regex, MatcherConfig)>,
     client: Client,
     handlebars: Handlebars<'static>,
+    auth_failed: AtomicBool,
 }
 
 impl DynamicProvider {
@@ -98,12 +99,73 @@ impl DynamicProvider {
             regex_matchers,
             client: Client::new(),
             handlebars,
+            auth_failed: AtomicBool::new(false),
         })
     }
     
     fn get_api_key(&self) -> Option<String> {
         self.config.api.api_key_env.as_ref()
             .and_then(|env_var| std::env::var(env_var).ok())
+    }
+
+    fn check_api_key_availability(&self) -> bool {
+        self.get_api_key().is_some()
+    }
+
+    fn create_api_key_help_result(&self, query: &str) -> ActionResult {
+        let env_var = self.config.api.api_key_env.as_deref().unwrap_or("API_KEY");
+        let action_id = utils::generate_id(&self.config.provider.id, "setup");
+        
+        ActionResult {
+            id: action_id,
+            provider: self.config.provider.id.clone(),
+            action: ActionType::Custom { action_id: "setup".to_string() },
+            title: format!("{} - Setup Required", self.config.provider.name),
+            description: format!(
+                "To use {}, set your API key: export {}=your-key-here", 
+                self.config.provider.name, 
+                env_var
+            ),
+            data: ActionData::Text(format!(
+                "This provider requires an API key. Please set the {} environment variable.",
+                env_var
+            )),
+            metadata: ActionMetadata {
+                icon: Some("⚠️".to_string()),
+                category: Some("setup".to_string()),
+                tags: vec!["setup".to_string(), "api-key".to_string()],
+                usage_count: 0,
+                last_used: None,
+            },
+        }
+    }
+
+    fn create_auth_failed_result(&self, query: &str) -> ActionResult {
+        let env_var = self.config.api.api_key_env.as_deref().unwrap_or("API_KEY");
+        let action_id = utils::generate_id(&self.config.provider.id, "auth_failed");
+        
+        ActionResult {
+            id: action_id,
+            provider: self.config.provider.id.clone(),
+            action: ActionType::Custom { action_id: "auth_failed".to_string() },
+            title: format!("{} - Invalid API Key", self.config.provider.name),
+            description: format!(
+                "API key for {} appears to be invalid or expired. Please check your {} setting.", 
+                self.config.provider.name, 
+                env_var
+            ),
+            data: ActionData::Text(format!(
+                "Authentication failed. Please verify your {} environment variable.",
+                env_var
+            )),
+            metadata: ActionMetadata {
+                icon: Some("🔑".to_string()),
+                category: Some("error".to_string()),
+                tags: vec!["authentication".to_string(), "api-key".to_string()],
+                usage_count: 0,
+                last_used: None,
+            },
+        }
     }
     
     fn get_location(&self) -> String {
@@ -175,6 +237,17 @@ impl DynamicProvider {
         let response = request.send().await
             .map_err(|e| ProviderError::Network(e.to_string()))?;
         
+        let status = response.status();
+        
+        // Handle authentication failures specifically
+        if status == 401 {
+            self.auth_failed.store(true, Ordering::Relaxed);
+            return Err(ProviderError::Api {
+                status: 401,
+                message: "Authentication failed - invalid or missing API key".to_string(),
+            });
+        }      
+  
         if !response.status().is_success() {
             return Err(ProviderError::Api {
                 status: response.status().as_u16(),
@@ -221,6 +294,15 @@ impl SearchProvider for DynamicProvider {
         if !self.config.provider.enabled {
             return false;
         }
+
+        // Don't handle queries that are clearly for other providers
+        if query.is_empty() || 
+           query == "apps" || 
+           query.starts_with("app:") ||
+           query.starts_with("ai:") || 
+           query.starts_with("ask:") {
+            return false;
+        }
         
         // Check prefixes
         for prefix in &self.config.triggers.prefixes {
@@ -252,6 +334,25 @@ impl SearchProvider for DynamicProvider {
     }
     
     async fn search(&self, query: &str) -> ProviderResult<Vec<ScoredResult>> {
+        if !self.check_api_key_availability() {
+            let help_result = self.create_api_key_help_result(query);
+            return Ok(
+                vec![
+                    ScoredResult::new(
+                        help_result,
+                        10, // Low score since it's just a setup message
+                        self.config.provider.id.clone()
+                    )
+                ]
+            )
+        }
+
+        // Check if authentication has previously failed
+        if self.auth_failed.load(Ordering::Relaxed) {
+            let auth_failed_result = self.create_auth_failed_result(query);
+            return Ok(vec![ScoredResult::new(auth_failed_result, 10, self.config.provider.id.clone())]);
+        }
+        
         // Strip known prefixes
         let mut processed_query = query;
         for prefix in &self.config.triggers.prefixes {
@@ -325,7 +426,7 @@ impl SearchProvider for DynamicProvider {
     }
     
     fn configure(&mut self, _config: &crate::config::Config) {
-        // Reload configuration if needed
+        self.auth_failed.store(false, Ordering::Relaxed);
     }
 }
 

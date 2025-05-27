@@ -161,6 +161,7 @@ impl SearchProvider for ApplicationProvider {
         query.is_empty() ||
         query.starts_with("app:") ||
         query.starts_with("apps") ||
+        query == "apps" ||
         (!query.starts_with("ai:") && !query.starts_with("ask:")) // Handle general queries unless they're AI queries
     }
 
@@ -189,22 +190,34 @@ impl SearchProvider for ApplicationProvider {
             let app_id = utils::generate_id("app", &app.name);
             
             let score = if processed_query.is_empty() {
-                // Empty query - check for usage data
-                let usage_count = usage::get_usage_count(&app_id);
-                let usage_boost = usage::get_usage_boost(&app_id);
-                
-                utils::log_debug(&format!("App '{}': usage_count={}, usage_boost={}", 
-                    app.name, usage_count, usage_boost));
-                
-                if usage_count > 0 {
-                    usage_boost
-                } 
-                else {
-                    // If no apps have usage data, show some popular ones
-                    if matches.len() < 5 && is_common_app(&app.name) {
-                        20 // Give common apps a base score
+                if query == "apps" {
+                    // For "apps" keyword, show more apps with base scoring
+                    let usage_count = usage::get_usage_count(&app_id);
+                    if usage_count > 0 {
+                        let usage_boost = usage::get_usage_boost(&app_id);
+                        usage_boost
                     } else {
-                        continue;
+                        // Give all apps a base score when "apps" is used
+                        10
+                    }
+                } else {
+                    // Empty query - check for usage data
+                    let usage_count = usage::get_usage_count(&app_id);
+                    let usage_boost = usage::get_usage_boost(&app_id);
+                    
+                    utils::log_debug(&format!("App '{}': usage_count={}, usage_boost={}", 
+                        app.name, usage_count, usage_boost));
+                    
+                    if usage_count > 0 {
+                        usage_boost
+                    } 
+                    else {
+                        // If no apps have usage data, show some popular ones
+                        if matches.len() < 5 && is_common_app(&app.name) {
+                            20 // Give common apps a base score
+                        } else {
+                            continue;
+                        }
                     }
                 }
             } else {
@@ -247,15 +260,21 @@ impl SearchProvider for ApplicationProvider {
         matches.sort_by(|a, b| b.score.cmp(&a.score));
         
         if processed_query.is_empty() {
-            // For empty query, limit to top 5
-            matches.truncate(5);
-            utils::log_info(&format!("Empty query - returning {} top apps", matches.len()));
-            
-            // If we still have no matches, force some common apps
-            if matches.is_empty() {
-                utils::log_info("No apps with usage data found, creating fallback apps");
-                return Ok(create_fallback_apps());
+            if query == "apps" {
+                // For "apps" keyword, show more results (20-30 apps)
+                utils::log_info(&format!("'apps' keyword - returning {} apps", matches.len()));
+            } else {
+                // For empty query, limit to top 5
+                matches.truncate(5);
+                utils::log_info(&format!("Empty query - returning {} top apps", matches.len()));
+                
+                // If we still have no matches, force some common apps
+                if matches.is_empty() {
+                    utils::log_info("No apps with usage data found, creating fallback apps");
+                    return Ok(create_fallback_apps());
+                }
             }
+
         } else {
             // Normal limit for search queries
             matches.truncate(20);

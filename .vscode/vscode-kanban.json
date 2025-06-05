@@ -4,15 +4,6 @@
       "assignedTo": {
         "name": "Chris J"
       },
-      "creation_time": "2025-05-24T05:14:50.036Z",
-      "id": "3",
-      "references": [],
-      "title": "config as code theming / rofi drop in"
-    },
-    {
-      "assignedTo": {
-        "name": "Chris J"
-      },
       "creation_time": "2025-05-24T05:14:08.157Z",
       "id": "1",
       "references": [],
@@ -35,9 +26,57 @@
       "id": "5",
       "references": [],
       "title": "Smarter AI?"
+    },
+    {
+      "assignedTo": {
+        "name": "Chris J"
+      },
+      "creation_time": "2025-05-27T03:25:31.470Z",
+      "id": "9",
+      "references": [],
+      "title": "get some keys and test custom providers"
     }
   ],
   "in-progress": [
+    {
+      "assignedTo": {
+        "name": "Chris J"
+      },
+      "creation_time": "2025-05-27T03:23:49.093Z",
+      "id": "7",
+      "references": [],
+      "title": "Ai and \"apps\" list not showing up in rofi"
+    },
+    {
+      "assignedTo": {
+        "name": "Chris J"
+      },
+      "creation_time": "2025-05-27T03:24:01.851Z",
+      "id": "8",
+      "references": [],
+      "title": "directory autocomplete based on \"ls\""
+    },
+    {
+      "assignedTo": {
+        "name": "Chris J"
+      },
+      "creation_time": "2025-05-27T03:23:26.101Z",
+      "id": "6",
+      "references": [],
+      "title": "Resolve .rasi styling looks bad"
+    }
+  ],
+  "testing": [],
+  "done": [
+    {
+      "assignedTo": {
+        "name": "Chris J"
+      },
+      "creation_time": "2025-05-24T05:14:50.036Z",
+      "id": "3",
+      "references": [],
+      "title": "config as code theming / rofi drop in"
+    },
     {
       "assignedTo": {
         "name": "Chris J"
@@ -51,7 +90,5 @@
       "references": [],
       "title": "Ez service configuration"
     }
-  ],
-  "testing": [],
-  "done": []
+  ]
 }

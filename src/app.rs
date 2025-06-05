@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::{
     config::get_config,
     providers::ProviderManager,
-    services::{execution::ExecutionService, usage},
+    services::{execution::ExecutionService, usage, directory_autocomplete::DirectoryAutocomplete},
     types::{ActionResult, AppResult, SearchMessage}, 
     utils,
 };
@@ -31,6 +31,7 @@ pub struct App {
     // Services
     pub provider_manager: ProviderManager,
     pub execution_service: ExecutionService,
+    directory_autocomplete: DirectoryAutocomplete,
 
     // Control
     should_exit: bool,
@@ -55,6 +56,7 @@ impl App {
             history_index: None,
             provider_manager,
             execution_service,
+            directory_autocomplete: DirectoryAutocomplete::new(),
             should_exit: false,
         };
 
@@ -223,6 +225,17 @@ impl App {
                             self.error_message = None;
                         }
                         false => {
+                            // Check for directory autocomplete first
+                            if self.input.starts_with('/') || self.input.starts_with("~/") || self.input.contains('/') {
+                                // Show directory completions
+                                let completions = self.directory_autocomplete.get_completions(&self.input);
+                                if !completions.is_empty() {
+                                    self.results = completions;
+                                    self.selected_index = 0;
+                                    return Ok(());
+                                }
+                            }
+                            
                             // Only trigger live search for NON-AI queries
                             if get_config().search.enable_live_search {
                                 let input = self.input.clone();
@@ -243,10 +256,22 @@ impl App {
                         // When input becomes empty, show top apps again
                         self.clear_search_state();
                         self.load_initial_results().await;
-                    } else if get_config().search.enable_live_search && !self.is_ai_query(&self.input) {
-                        // Only trigger live search for NON-AI queries
-                        let input = self.input.clone();
-                        self.perform_search(&input, search_tx).await;
+                    } else {
+                        // Check for directory autocomplete
+                        if self.input.starts_with('/') || self.input.starts_with("~/") || self.input.contains('/') {
+                            let completions = self.directory_autocomplete.get_completions(&self.input);
+                            if !completions.is_empty() {
+                                self.results = completions;
+                                self.selected_index = 0;
+                                return Ok(());
+                            }
+                        }
+                        
+                        // Regular live search for NON-AI queries
+                        if get_config().search.enable_live_search && !self.is_ai_query(&self.input) {
+                            let input = self.input.clone();
+                            self.perform_search(&input, search_tx).await;
+                        }
                     }
                 }
             }

@@ -78,14 +78,116 @@ impl RofiInterface {
 
         // Parse selection and execute if found
         if let Some(selected_result) = self.parse_selection(&selection, &all_results) {
-            utils::log_info(&format!("Rofi selection: {}", selected_result.title));
+            utils::log_info(&format!("Rofi selection: {} ({})", selected_result.title, selected_result.provider));
             
-            // Record usage
-            usage::record_usage(&selected_result.id);
-            
-            // Execute the selected action
-            let execution_service = crate::services::ExecutionService::new();
-            execution_service.execute(&selected_result).await?;
+            // Handle different action types
+            match &selected_result.action {
+                crate::types::ActionType::Custom { action_id } if selected_result.provider == "ai_helper" => {
+                    // Handle AI helper entries - execute AI queries directly
+                    if let crate::types::ActionData::Text(ref ai_query) = selected_result.data {
+                        utils::log_info(&format!("Executing AI query: {}", ai_query));
+                        
+                        // Perform AI search
+                        let ai_results = app.provider_manager.search_all(ai_query).await;
+                        
+                        if let Some(ai_result) = ai_results.first() {
+                            usage::record_usage(&ai_result.result.id);
+                            
+                            // For AI responses, show the result in rofi
+                            if let crate::types::ActionData::Text(ref ai_response) = ai_result.result.data {
+                                // Use rofi to display the AI response
+                                let display_entries = vec![
+                                    format!("🤖 AI: {}", ai_query.strip_prefix("ai: ").unwrap_or(ai_query)),
+                                    "".to_string(),
+                                    format!("💬 {}", ai_response),
+                                    "".to_string(),
+                                    "Press Enter to close, Esc to cancel".to_string(),
+                                ];
+                                let _ = self.execute_rofi(&display_entries).await;
+                            }
+                        } else {
+                            // No AI response
+                            let error_entries = vec![
+                                "❌ No AI response received".to_string(),
+                                "Check your GEMINI_API_KEY".to_string(),
+                                "Press Enter to close".to_string(),
+                            ];
+                            let _ = self.execute_rofi(&error_entries).await;
+                        }
+                    }
+                }
+                crate::types::ActionType::Custom { action_id } if selected_result.provider == "helper" => {
+                    // Handle helper entries - these trigger searches
+                    let query = match selected_result.data {
+                        crate::types::ActionData::Text(ref text) => text.clone(),
+                        _ => action_id.clone(),
+                    };
+                    
+                    utils::log_info(&format!("Executing search for: {}", query));
+                    
+                    // Perform the search and get results
+                    let search_results = app.provider_manager.search_all(&query).await;
+                    
+                    if search_results.is_empty() {
+                        utils::log_warn(&format!("No results found for: {}", query));
+                        return Ok(());
+                    }
+                    
+                    // If only one result, execute it directly
+                    if search_results.len() == 1 {
+                        let result = &search_results[0].result;
+                        usage::record_usage(&result.id);
+                        let execution_service = crate::services::ExecutionService::new();
+                        execution_service.execute(result).await?;
+                    } else {
+                        // Multiple results - show them in a second rofi instance
+                        let sub_results: Vec<ActionResult> = search_results.into_iter()
+                            .map(|sr| sr.result)
+                            .collect();
+                        
+                        let sub_entries = self.format_results_for_rofi(&sub_results);
+                        let sub_selection = self.execute_rofi(&sub_entries).await?;
+                        
+                        if let Some(final_result) = self.parse_selection(&sub_selection, &sub_results) {
+                            usage::record_usage(&final_result.id);
+                            let execution_service = crate::services::ExecutionService::new();
+                            execution_service.execute(&final_result).await?;
+                        }
+                    }
+                }
+                crate::types::ActionType::AiResponse if selected_result.provider == "ai" => {
+                    // Handle AI helper entries - extract the query and execute it
+                    if let crate::types::ActionData::Text(ref response) = selected_result.data {
+                        if response.starts_with("Use: ai:") {
+                            let ai_query = response.strip_prefix("Use: ").unwrap_or("ai:");
+                            utils::log_info(&format!("Executing AI query: {}", ai_query));
+                            
+                            // Perform AI search
+                            let ai_results = app.provider_manager.search_all(ai_query).await;
+                            
+                            if let Some(ai_result) = ai_results.first() {
+                                usage::record_usage(&ai_result.result.id);
+                                
+                                // For AI responses, show the result in a simple way
+                                if let crate::types::ActionData::Text(ref ai_response) = ai_result.result.data {
+                                    // Use rofi to display the AI response
+                                    let display_entries = vec![
+                                        format!("🤖 AI Response: {}", utils::truncate_text(ai_response, 100)),
+                                        "Press Enter to close".to_string(),
+                                    ];
+                                    let _ = self.execute_rofi(&display_entries).await;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    // Handle normal actions (apps, directories, etc.)
+                    usage::record_usage(&selected_result.id);
+                    let execution_service = crate::services::ExecutionService::new();
+                    execution_service.execute(&selected_result).await?;
+                }
+            }
         }
 
         Ok(())
@@ -144,29 +246,154 @@ impl RofiInterface {
             all_results.push(scored_result.result);
         }
 
+        // Get directory results from zoxide and direct paths
+        utils::log_debug("Gathering directories from zoxide...");
+        let dir_provider = app.provider_manager.get_provider("directories");
+        if let Some(provider) = dir_provider {
+            // Try a few common searches to get zoxide results
+            let dir_searches = vec!["", "Documents", "Downloads", "dev", "repos", "home"];
+            for search_term in dir_searches {
+                match provider.search(search_term).await {
+                    Ok(dir_results) => {
+                        for scored_result in dir_results {
+                            all_results.push(scored_result.result);
+                        }
+                    }
+                    Err(e) => {
+                        utils::log_debug(&format!("Directory search for '{}' failed: {}", search_term, e));
+                    }
+                }
+            }
+        }
+
+        // Get some common directories as fallback
+        utils::log_debug("Adding common directory shortcuts...");
+        let common_dirs = vec![
+            ("~", "Home Directory"),
+            ("~/Documents", "Documents"),
+            ("~/Downloads", "Downloads"),
+            ("~/Desktop", "Desktop"),
+            ("~/Pictures", "Pictures"),
+            ("~/Videos", "Videos"),
+            ("~/Music", "Music"),
+            ("/tmp", "Temporary Files"),
+            ("/", "Root Directory"),
+        ];
+        
+        for (path, description) in common_dirs {
+            let expanded_path = shellexpand::tilde(path).into_owned();
+            if std::path::Path::new(&expanded_path).exists() {
+                let dir_result = ActionResult::new_navigate(
+                    utils::generate_id("dir", path),
+                    "directories",
+                    description.to_string(),
+                    expanded_path,
+                ).with_description(format!("Navigate to {}", path));
+                all_results.push(dir_result);
+            }
+        }
+
+        // Add AI helper entries (only if API key exists)
+        utils::log_debug("Adding AI helper entries...");
+        if std::env::var("GEMINI_API_KEY").is_ok() {
+            let ai_helpers = vec![
+                ("Quick Math", "ai: 2+2", "Ask AI to calculate something"),
+                ("What's the weather?", "ai: what's the weather today", "Get weather information"),
+                ("Define a word", "ai: define artificial intelligence", "Ask AI to define a word"),
+                ("Explain concept", "ai: explain quantum computing", "Ask AI to explain something"),
+                ("General question", "ai: hello", "Ask AI anything"),
+            ];
+            
+            for (title, query, description) in ai_helpers {
+                let ai_result = ActionResult {
+                    id: utils::generate_id("ai_helper", query),
+                    provider: "ai_helper".to_string(),
+                    action: crate::types::ActionType::Custom { action_id: "ai_query".to_string() },
+                    title: title.to_string(),
+                    description: description.to_string(),
+                    data: crate::types::ActionData::Text(query.to_string()),
+                    metadata: crate::types::ActionMetadata {
+                        icon: Some("🤖".to_string()),
+                        category: Some("ai".to_string()),
+                        tags: vec!["ai".to_string(), "helper".to_string()],
+                        usage_count: 0,
+                        last_used: None,
+                    },
+                };
+                all_results.push(ai_result);
+            }
+        }
+
+        // Add provider-specific entries (for enabled dynamic providers)
+        utils::log_debug("Adding provider helper entries...");
+        let provider_helpers = vec![
+            ("Weather", "weather", "Get weather information", "☁️"),
+            ("News", "news", "Get latest news", "📰"),
+            ("Sports", "sports", "Get sports updates", "🏆"),
+            ("Stocks", "stocks", "Get stock information", "📈"),
+        ];
+        
+        for (title, command, description, icon) in provider_helpers {
+            let helper_result = ActionResult {
+                id: utils::generate_id("helper", command),
+                provider: "helper".to_string(),
+                action: crate::types::ActionType::Custom { action_id: command.to_string() },
+                title: title.to_string(),
+                description: format!("{} - Use: {}", description, command),
+                data: crate::types::ActionData::Text(command.to_string()),
+                metadata: crate::types::ActionMetadata {
+                    icon: Some(icon.to_string()),
+                    category: Some("helper".to_string()),
+                    tags: vec!["helper".to_string(), command.to_string()],
+                    usage_count: 0,
+                    last_used: None,
+                },
+            };
+            all_results.push(helper_result);
+        }
+
         // Deduplicate by ID
         let mut seen_ids = std::collections::HashSet::new();
         all_results.retain(|result| seen_ids.insert(result.id.clone()));
 
-        // Sort by usage boost and relevance
+        // Sort by provider priority and usage boost
         all_results.sort_by(|a, b| {
             let boost_a = usage::get_usage_boost(&a.id);
             let boost_b = usage::get_usage_boost(&b.id);
             
-            // Primary sort: usage boost (higher first)
-            match boost_b.cmp(&boost_a) {
-                std::cmp::Ordering::Equal => {
-                    // Secondary sort: alphabetical by title
-                    a.title.cmp(&b.title)
-                }
+            // Primary sort: provider type priority
+            let priority_a = match a.provider.as_str() {
+                "applications" => 1000 + boost_a,
+                "directories" => 500,
+                "ai_helper" => 300,
+                "helper" => 200,
+                _ => 100,
+            };
+            let priority_b = match b.provider.as_str() {
+                "applications" => 1000 + boost_b,
+                "directories" => 500,
+                "ai_helper" => 300,
+                "helper" => 200,
+                _ => 100,
+            };
+            
+            match priority_b.cmp(&priority_a) {
+                std::cmp::Ordering::Equal => a.title.cmp(&b.title),
                 other => other,
             }
         });
 
         // Limit results to prevent overwhelming rofi
-        all_results.truncate(50);
+        all_results.truncate(80);
 
-        utils::log_info(&format!("Gathered {} results for rofi", all_results.len()));
+        utils::log_info(&format!("Gathered {} results for rofi (apps: {}, dirs: {}, ai: {}, helpers: {})", 
+            all_results.len(),
+            all_results.iter().filter(|r| r.provider == "applications").count(),
+            all_results.iter().filter(|r| r.provider == "directories").count(),
+            all_results.iter().filter(|r| r.provider == "ai_helper").count(),
+            all_results.iter().filter(|r| r.provider == "helper").count()
+        ));
+        
         Ok(all_results)
     }
 
@@ -280,12 +507,13 @@ impl RofiInterface {
     fn get_provider_tag(&self, provider: &str) -> &'static str {
         match provider {
             "applications" => "APP",
-            "directories" => "DIR",
-            "ai" => "AI",
-            "weather" => "WEATHER",
-            "news" => "NEWS",
-            "sports" => "SPORTS",
-            "stocks" => "STOCK",
+            "directories" => "DIR", 
+            "ai_helper" => "AI",
+            "helper" => "CMD",
+            "weather" => "☁️",
+            "news" => "📰",
+            "sports" => "🏆",
+            "stocks" => "📈",
             _ => "EXT",
         }
     }

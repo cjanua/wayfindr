@@ -25,7 +25,7 @@ impl std::str::FromStr for InterfaceType {
 }
 
 /// Run wayfindr with the specified interface
-pub async fn run_interface(interface: InterfaceType, mut app: App) -> AppResult<()> {
+pub async fn run_interface(interface: InterfaceType, app: App) -> AppResult<()> {
     match interface {
         InterfaceType::Tui => {
             tui::run_tui(app).await

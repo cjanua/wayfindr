@@ -1,7 +1,7 @@
 // src/interfaces/tui.rs - TUI interface (extracted from main app)
 use crate::app::App;
 use crate::types::{AppResult, SearchMessage};
-use crate::{terminal, ui};
+use crate::terminal;
 use ratatui::backend::CrosstermBackend;
 use tokio::sync::mpsc;
 

@@ -6,7 +6,6 @@ use crate::{
     types::{ActionResult, ActionType, AppResult},
     utils,
 };
-use std::collections::HashMap;
 use std::io::Write;
 use std::process::{Command, Stdio};
 use tokio::process::Command as AsyncCommand;

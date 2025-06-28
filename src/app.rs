@@ -154,7 +154,7 @@ impl App {
         search_tx: tokio::sync::mpsc::Sender<SearchMessage>,
         mut search_rx: tokio::sync::mpsc::Receiver<SearchMessage>,
     ) -> AppResult<()> {
-        use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+        use crossterm::event::{self, Event, KeyEventKind};
         use std::time::Duration;
 
         loop {

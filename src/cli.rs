@@ -1,5 +1,4 @@
 // src/cli.rs - Updated with interface selection
-use crate::utils::DEFAULT_LOG_FILE_PATH;
 use clap::{Parser, Subcommand};
 use std::{collections::HashMap, path::{Path, PathBuf}};
 

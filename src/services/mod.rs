@@ -5,4 +5,3 @@ pub mod usage;
 pub mod directory_autocomplete;
 
 pub use execution::ExecutionService;
-pub use usage::UsageService;

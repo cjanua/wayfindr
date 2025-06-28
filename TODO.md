@@ -7,13 +7,13 @@ Project Description
 ### Todo
 
 - [ ]   
-- [ ] rofi config fr  
-- [ ] Impl unused features  
-- [ ] rm unused features  
 
 ### In Progress
 
+- [ ] Impl unused features  
 
 ### Done ✓
 
+- [x] rm unused features  
+- [x] rofi config fr  
 

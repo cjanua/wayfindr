@@ -1,10 +1,10 @@
-// src/main.rs - Updated with interface selection
+// src/main.rs
 use anyhow::{Context, Result};
 
 mod app;
 mod cli;
 mod config;
-mod interfaces; // New interfaces module
+mod interfaces;
 mod providers;
 mod services;
 mod terminal;

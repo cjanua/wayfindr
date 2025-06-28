@@ -1,13 +1,11 @@
-// src/interfaces/rofi.rs - Rofi interface implementation
+// src/interfaces/rofi.rs - Cleaned up to use system rofi theme
 use crate::{
     app::App,
-    config::get_config,
     services::usage,
     types::{ActionResult, ActionType, AppResult},
     utils,
 };
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use tokio::process::Command as AsyncCommand;
 
 /// Run wayfindr with the rofi interface
@@ -26,7 +24,6 @@ pub struct RofiConfig {
     pub placeholder: String,
     pub lines: u32,
     pub width: u32,
-    pub theme: Option<String>,
     pub case_sensitive: bool,
     pub show_icons: bool,
 }
@@ -38,7 +35,6 @@ impl Default for RofiConfig {
             placeholder: "Search apps, directories, or ask AI...".to_string(),
             lines: 12,
             width: 60,
-            theme: Some("wayfindr".to_string()),
             case_sensitive: false,
             show_icons: true,
         }
@@ -58,9 +54,6 @@ impl RofiInterface {
         // Check if rofi is available
         self.check_rofi_available()?;
 
-        // Install theme if it doesn't exist
-        self.ensure_theme_installed()?;
-
         // Gather all results for static mode
         let all_results = self.gather_all_results(app).await?;
 
@@ -79,114 +72,7 @@ impl RofiInterface {
         if let Some(selected_result) = self.parse_selection(&selection, &all_results) {
             utils::log_info(&format!("Rofi selection: {} ({})", selected_result.title, selected_result.provider));
             
-            // Handle different action types
-            match &selected_result.action {
-                crate::types::ActionType::Custom { action_id } if selected_result.provider == "ai_helper" => {
-                    // Handle AI helper entries - execute AI queries directly
-                    if let crate::types::ActionData::Text(ref ai_query) = selected_result.data {
-                        utils::log_info(&format!("Executing AI query: {}", ai_query));
-                        
-                        // Perform AI search
-                        let ai_results = app.provider_manager.search_all(ai_query).await;
-                        
-                        if let Some(ai_result) = ai_results.first() {
-                            usage::record_usage(&ai_result.result.id);
-                            
-                            // For AI responses, show the result in rofi
-                            if let crate::types::ActionData::Text(ref ai_response) = ai_result.result.data {
-                                // Use rofi to display the AI response
-                                let display_entries = vec![
-                                    format!("🤖 AI: {}", ai_query.strip_prefix("ai: ").unwrap_or(ai_query)),
-                                    "".to_string(),
-                                    format!("💬 {}", ai_response),
-                                    "".to_string(),
-                                    "Press Enter to close, Esc to cancel".to_string(),
-                                ];
-                                let _ = self.execute_rofi(&display_entries).await;
-                            }
-                        } else {
-                            // No AI response
-                            let error_entries = vec![
-                                "❌ No AI response received".to_string(),
-                                "Check your GEMINI_API_KEY".to_string(),
-                                "Press Enter to close".to_string(),
-                            ];
-                            let _ = self.execute_rofi(&error_entries).await;
-                        }
-                    }
-                }
-                crate::types::ActionType::Custom { action_id } if selected_result.provider == "helper" => {
-                    // Handle helper entries - these trigger searches
-                    let query = match selected_result.data {
-                        crate::types::ActionData::Text(ref text) => text.clone(),
-                        _ => action_id.clone(),
-                    };
-                    
-                    utils::log_info(&format!("Executing search for: {}", query));
-                    
-                    // Perform the search and get results
-                    let search_results = app.provider_manager.search_all(&query).await;
-                    
-                    if search_results.is_empty() {
-                        utils::log_warn(&format!("No results found for: {}", query));
-                        return Ok(());
-                    }
-                    
-                    // If only one result, execute it directly
-                    if search_results.len() == 1 {
-                        let result = &search_results[0].result;
-                        usage::record_usage(&result.id);
-                        let execution_service = crate::services::ExecutionService::new();
-                        execution_service.execute(result).await?;
-                    } else {
-                        // Multiple results - show them in a second rofi instance
-                        let sub_results: Vec<ActionResult> = search_results.into_iter()
-                            .map(|sr| sr.result)
-                            .collect();
-                        
-                        let sub_entries = self.format_results_for_rofi(&sub_results);
-                        let sub_selection = self.execute_rofi(&sub_entries).await?;
-                        
-                        if let Some(final_result) = self.parse_selection(&sub_selection, &sub_results) {
-                            usage::record_usage(&final_result.id);
-                            let execution_service = crate::services::ExecutionService::new();
-                            execution_service.execute(&final_result).await?;
-                        }
-                    }
-                }
-                crate::types::ActionType::AiResponse if selected_result.provider == "ai" => {
-                    // Handle AI helper entries - extract the query and execute it
-                    if let crate::types::ActionData::Text(ref response) = selected_result.data {
-                        if response.starts_with("Use: ai:") {
-                            let ai_query = response.strip_prefix("Use: ").unwrap_or("ai:");
-                            utils::log_info(&format!("Executing AI query: {}", ai_query));
-                            
-                            // Perform AI search
-                            let ai_results = app.provider_manager.search_all(ai_query).await;
-                            
-                            if let Some(ai_result) = ai_results.first() {
-                                usage::record_usage(&ai_result.result.id);
-                                
-                                // For AI responses, show the result in a simple way
-                                if let crate::types::ActionData::Text(ref ai_response) = ai_result.result.data {
-                                    // Use rofi to display the AI response
-                                    let display_entries = vec![
-                                        format!("🤖 AI Response: {}", utils::truncate_text(ai_response, 100)),
-                                        "Press Enter to close".to_string(),
-                                    ];
-                                    let _ = self.execute_rofi(&display_entries).await;
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    // Handle normal actions (apps, directories, etc.)
-                    usage::record_usage(&selected_result.id);
-                    let execution_service = crate::services::ExecutionService::new();
-                    execution_service.execute(&selected_result).await?;
-                }
-            }
+            self.handle_selection(&selected_result, app).await?;
         }
 
         Ok(())
@@ -205,40 +91,15 @@ impl RofiInterface {
         }
     }
 
-    fn ensure_theme_installed(&self) -> AppResult<()> {
-        let config = get_config();
-        let theme_dir = config.paths.config_dir.join("rofi");
-        let theme_file = theme_dir.join("wayfindr.rasi");
-
-        // Create rofi config directory if it doesn't exist
-        if !theme_dir.exists() {
-            std::fs::create_dir_all(&theme_dir)
-                .map_err(|e| crate::types::AppError::ActionExecution(
-                    format!("Failed to create rofi theme directory: {}", e)
-                ))?;
-        }
-
-        // Install theme if it doesn't exist
-        if !theme_file.exists() {
-            std::fs::write(&theme_file, WAYFINDR_ROFI_THEME)
-                .map_err(|e| crate::types::AppError::ActionExecution(
-                    format!("Failed to write rofi theme: {}", e)
-                ))?;
-            utils::log_info(&format!("Installed wayfindr rofi theme to: {}", theme_file.display()));
-        }
-
-        Ok(())
-    }
-
     async fn gather_all_results(&self, app: &mut App) -> AppResult<Vec<ActionResult>> {
-        let mut all_results = Vec::new();
+        let mut all_results: Vec<ActionResult> = Vec::new();
 
         // Get top apps first (these have usage data)
         utils::log_debug("Gathering top applications...");
         app.load_initial_results().await;
         all_results.extend(app.results.clone());
 
-        // Get all apps
+        // Get all apps with search
         utils::log_debug("Gathering all applications...");
         let all_apps_results = app.provider_manager.search_all("apps").await;
         for scored_result in all_apps_results {
@@ -249,23 +110,17 @@ impl RofiInterface {
         utils::log_debug("Gathering directories from zoxide...");
         let dir_provider = app.provider_manager.get_provider("directories");
         if let Some(provider) = dir_provider {
-            // Try a few common searches to get zoxide results
             let dir_searches = vec!["", "Documents", "Downloads", "dev", "repos", "home"];
             for search_term in dir_searches {
-                match provider.search(search_term).await {
-                    Ok(dir_results) => {
-                        for scored_result in dir_results {
-                            all_results.push(scored_result.result);
-                        }
-                    }
-                    Err(e) => {
-                        utils::log_debug(&format!("Directory search for '{}' failed: {}", search_term, e));
+                if let Ok(dir_results) = provider.search(search_term).await {
+                    for scored_result in dir_results {
+                        all_results.push(scored_result.result);
                     }
                 }
             }
         }
 
-        // Get some common directories as fallback
+        // Add common directories as fallback
         utils::log_debug("Adding common directory shortcuts...");
         let common_dirs = vec![
             ("~", "Home Directory"),
@@ -293,8 +148,8 @@ impl RofiInterface {
         }
 
         // Add AI helper entries (only if API key exists)
-        utils::log_debug("Adding AI helper entries...");
         if std::env::var("GEMINI_API_KEY").is_ok() {
+            utils::log_debug("Adding AI helper entries...");
             let ai_helpers = vec![
                 ("Quick Math", "ai: 2+2", "Ask AI to calculate something"),
                 ("What's the weather?", "ai: what's the weather today", "Get weather information"),
@@ -323,8 +178,7 @@ impl RofiInterface {
             }
         }
 
-        // Add provider-specific entries (for enabled dynamic providers)
-        utils::log_debug("Adding provider helper entries...");
+        // Add provider-specific entries
         let provider_helpers = vec![
             ("Weather", "weather", "Get weather information", "☁️"),
             ("News", "news", "Get latest news", "📰"),
@@ -360,7 +214,6 @@ impl RofiInterface {
             let boost_a = usage::get_usage_boost(&a.id);
             let boost_b = usage::get_usage_boost(&b.id);
             
-            // Primary sort: provider type priority
             let priority_a = match a.provider.as_str() {
                 "applications" => 1000 + boost_a,
                 "directories" => 500,
@@ -385,13 +238,7 @@ impl RofiInterface {
         // Limit results to prevent overwhelming rofi
         all_results.truncate(80);
 
-        utils::log_info(&format!("Gathered {} results for rofi (apps: {}, dirs: {}, ai: {}, helpers: {})", 
-            all_results.len(),
-            all_results.iter().filter(|r| r.provider == "applications").count(),
-            all_results.iter().filter(|r| r.provider == "directories").count(),
-            all_results.iter().filter(|r| r.provider == "ai_helper").count(),
-            all_results.iter().filter(|r| r.provider == "helper").count()
-        ));
+        utils::log_info(&format!("Gathered {} results for rofi", all_results.len()));
         
         Ok(all_results)
     }
@@ -403,8 +250,6 @@ impl RofiInterface {
                 let icon = self.get_result_icon(result);
                 let provider_tag = self.get_provider_tag(&result.provider);
                 
-                // Format: "icon title [TAG]"
-                // Simple format that's easy to parse back
                 if result.description.is_empty() || result.description == result.title {
                     format!("{} {} [{}]", icon, result.title, provider_tag)
                 } else {
@@ -420,9 +265,6 @@ impl RofiInterface {
     }
 
     async fn execute_rofi(&self, entries: &[String]) -> AppResult<Option<String>> {
-        let config = get_config();
-        let theme_file = config.paths.config_dir.join("rofi").join("wayfindr.rasi");
-        
         let mut cmd = AsyncCommand::new("rofi");
         cmd.arg("-dmenu")
            .arg("-i") // Case insensitive
@@ -434,14 +276,12 @@ impl RofiInterface {
            .arg("-no-custom") // Only allow selections from the list
            .arg("-format").arg("s"); // Return the selected string
 
-        // Use our custom theme
-        if theme_file.exists() {
-            cmd.arg("-theme").arg(theme_file);
-        }
+        // Use system rofi theme (selected via 'rofi theme selector')
+        // No explicit theme argument - let rofi use the user's configured theme
 
-        cmd.stdin(Stdio::piped())
-           .stdout(Stdio::piped())
-           .stderr(Stdio::piped());
+        cmd.stdin(std::process::Stdio::piped())
+           .stdout(std::process::Stdio::piped())
+           .stderr(std::process::Stdio::piped());
 
         let mut child = cmd.spawn()
             .map_err(|e| crate::types::AppError::ActionExecution(
@@ -493,13 +333,111 @@ impl RofiInterface {
         None
     }
 
+    async fn handle_selection(&self, selected_result: &ActionResult, app: &mut App) -> AppResult<()> {
+        match &selected_result.action {
+            crate::types::ActionType::Custom { action_id } if selected_result.provider == "ai_helper" => {
+                self.handle_ai_query(selected_result, app).await
+            }
+            crate::types::ActionType::Custom { action_id } if selected_result.provider == "helper" => {
+                self.handle_helper_query(selected_result, app).await
+            }
+            _ => {
+                // Handle normal actions (apps, directories, etc.)
+                usage::record_usage(&selected_result.id);
+                let execution_service = crate::services::ExecutionService::new();
+                execution_service.execute(&selected_result).await?;
+                Ok(())
+            }
+        }
+    }
+
+    async fn handle_ai_query(&self, result: &ActionResult, app: &mut App) -> AppResult<()> {
+        if let crate::types::ActionData::Text(ref ai_query) = result.data {
+            utils::log_info(&format!("Executing AI query: {}", ai_query));
+            
+            let ai_results = app.provider_manager.search_all(ai_query).await;
+            
+            if let Some(ai_result) = ai_results.first() {
+                usage::record_usage(&ai_result.result.id);
+                
+                if let crate::types::ActionData::Text(ref ai_response) = ai_result.result.data {
+                    // Show AI response in a new rofi dialog
+                    let display_entries = vec![
+                        format!("🤖 AI: {}", ai_query.strip_prefix("ai: ").unwrap_or(ai_query)),
+                        "".to_string(),
+                        format!("💬 {}", ai_response),
+                        "".to_string(),
+                        "Press Enter to close".to_string(),
+                    ];
+                    let _ = self.execute_rofi(&display_entries).await;
+                }
+            } else {
+                let error_entries = vec![
+                    "❌ No AI response received".to_string(),
+                    "Check your GEMINI_API_KEY".to_string(),
+                    "Press Enter to close".to_string(),
+                ];
+                let _ = self.execute_rofi(&error_entries).await;
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_helper_query(&self, result: &ActionResult, app: &mut App) -> AppResult<()> {
+        let query = match result.data {
+            crate::types::ActionData::Text(ref text) => text.clone(),
+            _ => return Ok(()),
+        };
+        
+        utils::log_info(&format!("Executing search for: {}", query));
+        
+        let search_results = app.provider_manager.search_all(&query).await;
+        
+        if search_results.is_empty() {
+            utils::log_warn(&format!("No results found for: {}", query));
+            return Ok(());
+        }
+        
+        if search_results.len() == 1 {
+            let result = &search_results[0].result;
+            usage::record_usage(&result.id);
+            let execution_service = crate::services::ExecutionService::new();
+            execution_service.execute(result).await?;
+        } else {
+            // Multiple results - show them in a second rofi instance
+            let sub_results: Vec<ActionResult> = search_results.into_iter()
+                .map(|sr| sr.result)
+                .collect();
+            
+            let sub_entries = self.format_results_for_rofi(&sub_results);
+            let sub_selection = self.execute_rofi(&sub_entries).await?;
+            
+            if let Some(final_result) = self.parse_selection(&sub_selection, &sub_results) {
+                usage::record_usage(&final_result.id);
+                let execution_service = crate::services::ExecutionService::new();
+                execution_service.execute(&final_result).await?;
+            }
+        }
+        Ok(())
+    }
+
     fn get_result_icon(&self, result: &ActionResult) -> &'static str {
+        // Use icon from metadata if available, otherwise fall back to action type
+        if let Some(ref icon) = result.metadata.icon {
+            // For emoji icons, return as-is (but we need to convert to &'static str)
+            // This is a limitation - we'll use the action type for now
+        }
+        
         match &result.action {
             ActionType::Launch { needs_terminal: true } => "⚡",
             ActionType::Launch { needs_terminal: false } => "🚀",
             ActionType::Navigate { .. } => "📁",
             ActionType::AiResponse => "🤖",
-            ActionType::Custom { .. } => "⚙️",
+            ActionType::Custom { .. } => match result.provider.as_str() {
+                "ai_helper" => "🤖",
+                "helper" => "⚙️",
+                _ => "⚙️",
+            },
         }
     }
 
@@ -509,10 +447,10 @@ impl RofiInterface {
             "directories" => "DIR", 
             "ai_helper" => "AI",
             "helper" => "CMD",
-            "weather" => "☁️",
-            "news" => "📰",
-            "sports" => "🏆",
-            "stocks" => "📈",
+            "weather" => "WTH",
+            "news" => "NEWS",
+            "sports" => "SPT",
+            "stocks" => "STK",
             _ => "EXT",
         }
     }
@@ -525,190 +463,3 @@ impl RofiInterface {
         }
     }
 }
-
-// Custom wayfindr rofi theme
-const WAYFINDR_ROFI_THEME: &str = r#"/*
- * Wayfindr Rofi Theme
- * A beautiful, modern theme for the wayfindr launcher
- */
-
-configuration {
-    show-icons: false;
-    display-drun: "wayfindr";
-    disable-history: false;
-    click-to-exit: true;
-    location: 0;
-}
-
-* {
-    /* Catppuccin Mocha Colors */
-    bg: #1e1e2e;
-    bg-alt: #313244;
-    bg-selected: #45475a;
-    fg: #cdd6f4;
-    fg-alt: #6c7086;
-    
-    primary: #89b4fa;
-    secondary: #f38ba8;
-    accent: #a6e3a1;
-    urgent: #fab387;
-    
-    border: 2px;
-    border-color: @primary;
-    border-radius: 8px;
-    
-    font: "JetBrains Mono 11";
-    text-font: "Inter 10";
-}
-
-window {
-    transparency: "real";
-    background-color: @bg;
-    border: @border;
-    border-color: @border-color;
-    border-radius: @border-radius;
-    width: 700px;
-    location: center;
-    anchor: center;
-    x-offset: 0;
-    y-offset: -100;
-}
-
-mainbox {
-    background-color: transparent;
-    children: [inputbar, message, listview];
-    spacing: 8px;
-    padding: 16px;
-}
-
-inputbar {
-    background-color: @bg-alt;
-    border-radius: @border-radius;
-    padding: 12px 16px;
-    children: [prompt, entry];
-    border: 1px;
-    border-color: @primary;
-}
-
-prompt {
-    background-color: transparent;
-    text-color: @primary;
-    font: @font;
-    margin: 0 8px 0 0;
-}
-
-entry {
-    background-color: transparent;
-    text-color: @fg;
-    font: @text-font;
-    placeholder: "Search apps, directories, or ask AI...";
-    placeholder-color: @fg-alt;
-    cursor: text;
-}
-
-message {
-    background-color: @bg-alt;
-    border-radius: @border-radius;
-    padding: 8px 12px;
-    margin: 0;
-    text-color: @fg-alt;
-    font: @text-font;
-}
-
-listview {
-    background-color: transparent;
-    lines: 12;
-    columns: 1;
-    spacing: 4px;
-    cycle: false;
-    dynamic: true;
-    scrollbar: true;
-    scrollbar-width: 4px;
-    border: 0;
-    margin: 4px 0 0 0;
-}
-
-scrollbar {
-    background-color: @bg-alt;
-    border-radius: 4px;
-    handle-color: @primary;
-    handle-width: 4px;
-}
-
-element {
-    background-color: transparent;
-    border-radius: @border-radius;
-    padding: 10px 12px;
-    text-color: @fg;
-    margin: 0 0 2px 0;
-    border: 1px;
-    border-color: transparent;
-}
-
-element normal.normal {
-    background-color: transparent;
-    text-color: @fg;
-}
-
-element normal.urgent {
-    background-color: @urgent;
-    text-color: @bg;
-}
-
-element normal.active {
-    background-color: @accent;
-    text-color: @bg;
-}
-
-element selected.normal {
-    background-color: @primary;
-    text-color: @bg;
-    border-color: @primary;
-}
-
-element selected.urgent {
-    background-color: @urgent;
-    text-color: @bg;
-}
-
-element selected.active {
-    background-color: @accent;
-    text-color: @bg;
-}
-
-element alternate.normal {
-    background-color: transparent;
-    text-color: @fg;
-}
-
-element alternate.urgent {
-    background-color: @urgent;
-    text-color: @bg;
-}
-
-element alternate.active {
-    background-color: @accent;
-    text-color: @bg;
-}
-
-element-text {
-    background-color: transparent;
-    text-color: inherit;
-    font: @text-font;
-    margin: 0;
-    padding: 0;
-    cursor: pointer;
-}
-
-element-icon {
-    background-color: transparent;
-    size: 20px;
-    margin: 0 8px 0 0;
-    cursor: pointer;
-}
-
-/* Custom styling for different result types */
-element-text selected {
-    text-color: @bg;
-}
-"#;

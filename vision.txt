@@ -439,7 +439,7 @@ You're aiming for a highly responsive overlay, which is key for a launcher.
         ai_prefix = "ai:"
         zoxide_prefix = "z:"
         web_search_prefix = "web:"
-        default_terminal = "kitty"
+        default_terminal = "alacritty"
 
         [theme]
         background_color = "#282a36"

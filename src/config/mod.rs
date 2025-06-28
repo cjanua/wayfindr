@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 const CONFIG_DIR_NAME: &str = ".wayfindr";
 const CONFIG_FILE_NAME: &str = "config.toml";
-const DEFAULT_TERMINAL: &str = "kitty";
+const DEFAULT_TERMINAL: &str = "alacritty";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {

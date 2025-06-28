@@ -325,6 +325,7 @@ fn create_fallback_apps() -> Vec<ScoredResult> {
     let fallback_apps = vec![
         ("Firefox", "firefox", "Web Browser", false),
         ("Terminal", "kitty", "Terminal Emulator", true),
+        ("Terminal", "alacritty", "Terminal Emulator", true),
         ("Files", "nautilus", "File Manager", false),
         ("Text Editor", "gedit", "Text Editor", false),
         ("Calculator", "gnome-calculator", "Calculator", false),

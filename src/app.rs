@@ -105,7 +105,7 @@ impl App {
         let common_apps = vec![
             ("firefox", "Firefox Web Browser", "firefox", false),
             ("code", "Visual Studio Code", "code", false),
-            ("kitty", "Kitty Terminal", "kitty", true),
+            ("alacritty", "Alacritty Terminal", "alacritty", true),
             ("nautilus", "Files", "nautilus", false),
             ("spotify", "Spotify", "spotify", false),
         ];
